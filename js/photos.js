@@ -22,6 +22,9 @@
   var _groupByDate = false;     // 撮影日でまとめて表示
   var _drafts = {};             // 編集途中（下書き）がある写真ID
   var _dragIds = null;          // ドラッグ中の写真ID配列（サイドバーへD&Dで分類反映）
+  var _regCombos = [];          // 呼び出した分類の組合せ（写真に紐づかない・件数0でサイドバー表示）
+
+  function regFacetKey(id) { return 'regFacets_' + id; }
 
   // Undo/Redo 用の写真レコードのスナップショット・記録（call-time で App.Undo 参照）
   function snap(p) { return global.App.Undo ? global.App.Undo.snapshot(p) : Object.assign({}, p); }
@@ -188,8 +191,11 @@
       _photos = res[0];
       _inAlbum = global.App.Albums ? global.App.Albums.photoIdSet(res[1]) : {};
       _drafts = {};
+      _regCombos = [];
+      var regKey = regFacetKey(proj.id);
       (res[2] || []).forEach(function (row) {
         if (row.key && row.key.indexOf(DRAFT_PREFIX) === 0) _drafts[row.key.slice(DRAFT_PREFIX.length)] = true;
+        if (row.key === regKey && Array.isArray(row.value)) _regCombos = row.value;
       });
       render();
     });
@@ -227,18 +233,44 @@
       });
     });
   }
-  // その facet に出す値（記入済みのみ・件数付き・並び）
-  function facetValues(field) {
-    var counts = {};
-    photosForFacet(field).forEach(function (p) {
-      var v = facetVal(field, p);
-      if (field !== 'date' && !v) return; // 記入済みのみ
-      counts[v] = (counts[v] || 0) + 1;
+  // 集計対象の行：実写真(_count:1) ＋ 呼び出した分類(_count:0)
+  function facetRows() {
+    var rows = _photos.map(function (p) { return { r: p, _count: 1 }; });
+    _regCombos.forEach(function (c) { rows.push({ r: c, _count: 0 }); });
+    return rows;
+  }
+  // 上位選択に一致する行だけ（写真＋登録分類を同じ土俵で連動）
+  function rowsForFacet(field) {
+    var f = facetDef(field);
+    return facetRows().filter(function (row) {
+      return f.parents.every(function (pf) {
+        var sel = _facets[pf], keys = Object.keys(sel);
+        return !keys.length || sel[facetVal(pf, row.r)];
+      });
     });
-    var keys = Object.keys(counts);
-    if (field === 'date') keys.sort(function (a, b) { if (a === '日付なし') return 1; if (b === '日付なし') return -1; return a < b ? 1 : (a > b ? -1 : 0); });
-    else keys.sort(function (a, b) { return a.localeCompare(b, 'ja'); });
-    return keys.map(function (k) { return { value: k, count: counts[k] }; });
+  }
+  // その facet に出す値（記入済みのみ・件数付き・並び）。登録分類は件数0でも一覧に含める
+  function facetValues(field) {
+    if (field === 'date') {
+      // 撮影日は写真のみ（登録分類は日付を持たない）
+      var dcounts = {};
+      photosForFacet('date').forEach(function (p) {
+        dcounts[facetVal('date', p)] = (dcounts[facetVal('date', p)] || 0) + 1;
+      });
+      var dkeys = Object.keys(dcounts);
+      dkeys.sort(function (a, b) { if (a === '日付なし') return 1; if (b === '日付なし') return -1; return a < b ? 1 : (a > b ? -1 : 0); });
+      return dkeys.map(function (k) { return { value: k, count: dcounts[k] }; });
+    }
+    var counts = {}, present = {};
+    rowsForFacet(field).forEach(function (row) {
+      var v = facetVal(field, row.r);
+      if (!v) return; // 記入済みのみ（空文字は除外）
+      present[v] = true;
+      counts[v] = (counts[v] || 0) + (row._count || 0);
+    });
+    var keys = Object.keys(present);
+    keys.sort(function (a, b) { return a.localeCompare(b, 'ja'); });
+    return keys.map(function (k) { return { value: k, count: counts[k] || 0 }; });
   }
   // 上位変更で候補から消えた下位のチェックを解除（parents 先→子の順で処理）
   function pruneFacets() {
@@ -279,12 +311,21 @@
   function renderSidebar() {
     if (!_sidebar) return;
     var proj = Projects.current();
-    if (!proj || !_photos.length) {
-      _sidebar.innerHTML = '<div class="side-empty">写真を取り込むと、ここに分類ごとの絞り込みが出ます。</div>';
+    if (!proj) { _sidebar.innerHTML = ''; return; }
+    // 見出し（呼び出し・クリア等のボタンは常時）
+    var head = '<div class="side-head"><b>絞り込み</b>' +
+      '<button class="btn btn-sm" id="facetRecall" title="以前の工事の分類をここに並べます">分類を呼び出す</button>' +
+      (_regCombos.length ? '<button class="btn btn-sm" id="facetRecallClear" title="呼び出した分類を消す">呼出しを消す</button>' : '') +
+      (anyFacetSelected() ? '<button class="btn btn-sm" id="facetClear">クリア</button>' : '') +
+      '</div>';
+    // 写真も呼び出し分類も無ければ案内文（＋見出しの呼び出しボタンは出す）
+    if (!_photos.length && !_regCombos.length) {
+      _sidebar.innerHTML = head +
+        '<div class="side-empty">写真を取り込むか、「分類を呼び出す」で以前の工事の分類をここに並べられます。</div>';
+      wireSidebarHead();
       return;
     }
-    var html = '<div class="side-head"><b>絞り込み</b>' +
-      (anyFacetSelected() ? '<button class="btn btn-sm" id="facetClear">クリア</button>' : '') + '</div>';
+    var html = head;
     FACETS.forEach(function (f) {
       var vals = facetValues(f.field);
       if (!vals.length) return; // 記入済みが無ければ非表示
@@ -302,8 +343,7 @@
     });
     _sidebar.innerHTML = html;
 
-    var clr = document.getElementById('facetClear');
-    if (clr) clr.onclick = function () { FACETS.forEach(function (f) { _facets[f.field] = {}; }); render(); };
+    wireSidebarHead();
     Array.prototype.forEach.call(_sidebar.querySelectorAll('[data-facet]'), function (cb) {
       cb.onchange = function () {
         var field = cb.getAttribute('data-facet'), val = cb.getAttribute('data-val');
@@ -325,6 +365,88 @@
         e.preventDefault();
         row.classList.remove('drop-hover');
         applyDrop(row.getAttribute('data-drop-field'), row.getAttribute('data-drop-val'));
+      });
+    });
+  }
+
+  /* サイドバー見出しのボタン配線（クリア／分類を呼び出す／呼出しを消す） */
+  function wireSidebarHead() {
+    var clr = document.getElementById('facetClear');
+    if (clr) clr.onclick = function () { FACETS.forEach(function (f) { _facets[f.field] = {}; }); render(); };
+    var rec = document.getElementById('facetRecall');
+    if (rec) rec.onclick = openRecallFacets;
+    var rcl = document.getElementById('facetRecallClear');
+    if (rcl) rcl.onclick = clearRecalledFacets;
+  }
+
+  /* 呼び出した分類の重複キー（5フィールドの組合せ） */
+  function comboKey(c) {
+    return [c.kubun || '', c.koushu || '', c.shubetsu || '', c.saibetsu || '', c.spot || ''].join('');
+  }
+
+  /* 以前の工事の分類を呼び出してサイドバーに登録（写真は取り込まない） */
+  function openRecallFacets() {
+    var cur = Projects.current();
+    if (!cur) { UI.alert('先に工事を選択してください。', '分類を呼び出す'); return; }
+    Projects.list().then(function (all) {
+      var others = all.filter(function (pj) { return pj.id !== cur.id; });
+      if (!others.length) { UI.alert('呼び出せる他の工事がありません。', '分類を呼び出す'); return; }
+      var wrap = document.createElement('div');
+      wrap.className = 'detail-form';
+      var opts = '<option value="">（分類を呼び出す工事を選択）</option>';
+      others.forEach(function (pj) { opts += '<option value="' + UI.esc(pj.id) + '">' + UI.esc(pj.name) + '</option>'; });
+      wrap.innerHTML =
+        '<p class="note">選んだ工事で使われている分類（工種・種別・細別・撮影区分・撮影場所）を、この工事のサイドバーに並べます（写真は取り込みません）。</p>' +
+        '<label class="field"><span>呼び出す工事</span><select id="rcTarget">' + opts + '</select></label>' +
+        '<div class="detail-actions"><button class="btn btn-primary btn-lg" id="rcApply">呼び出す</button></div>';
+      var close = UI.modal(wrap, '分類を呼び出す');
+      wrap.querySelector('#rcApply').onclick = function () {
+        var srcId = wrap.querySelector('#rcTarget').value;
+        if (!srcId) { UI.alert('工事を選んでください。', '分類を呼び出す'); return; }
+        var busy = UI.busy('分類を読み込み中…');
+        Storage.getPhotosByProject(srcId).then(function (photos) {
+          // 既存の登録分類 ＋ 元工事の組合せ を和集合
+          var seen = {}, merged = [];
+          _regCombos.forEach(function (c) { var k = comboKey(c); if (!seen[k]) { seen[k] = true; merged.push(c); } });
+          var added = 0;
+          photos.forEach(function (p) {
+            var c = {
+              kubun: (p.kubun || '').trim(), koushu: (p.koushu || '').trim(),
+              shubetsu: (p.shubetsu || '').trim(), saibetsu: (p.saibetsu || '').trim(),
+              spot: (p.spot || '').trim()
+            };
+            if (!c.kubun && !c.koushu && !c.shubetsu && !c.saibetsu && !c.spot) return; // 全空は除外
+            var k = comboKey(c);
+            if (seen[k]) return;
+            seen[k] = true; merged.push(c); added++;
+          });
+          return Storage.setSetting(regFacetKey(cur.id), merged).then(function () {
+            _regCombos = merged;
+            busy.close(); close();
+            UI.toast(added ? ('分類を呼び出しました（' + added + '件を追加）') : '追加された分類はありませんでした');
+            render();
+          });
+        }).catch(function (e) {
+          busy.close();
+          UI.alert('呼び出し中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
+        });
+      };
+    });
+  }
+
+  /* 呼び出した分類をこの工事から消す（写真・分類データには影響しない） */
+  function clearRecalledFacets() {
+    var cur = Projects.current();
+    if (!cur) return;
+    if (!_regCombos.length) return;
+    UI.confirm('呼び出した分類をサイドバーから消しますか？（写真や写真に付けた分類は変わりません）', '呼出しを消す').then(function (ok) {
+      if (!ok) return;
+      Storage.setSetting(regFacetKey(cur.id), []).then(function () {
+        _regCombos = [];
+        // 消えた分類にチェックが残っていれば掃除
+        FACETS.forEach(function (f) { _facets[f.field] = _facets[f.field] || {}; });
+        UI.toast('呼び出した分類を消しました');
+        render();
       });
     });
   }
