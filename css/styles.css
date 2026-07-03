@@ -23,6 +23,13 @@ body {
 .appbar.collapsed .appbar-actions { display: none; }
 /* 開閉トグルで下のツールバー（＋写真を取り込む/検索/選択バー）も収納 */
 .ui-collapsed .main-controls { display: none; }
+/* 自動取込：新規写真の選択ダイアログ */
+.autoimport-select .ai-tools { display: flex; gap: 8px; margin: 6px 0 10px; }
+.autoimport-select .ai-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 10px; max-height: 60vh; overflow: auto; padding: 4px; }
+.autoimport-select .ai-cell { display: flex; flex-direction: column; align-items: center; gap: 4px; border: 1px solid #e2e6ec; border-radius: 8px; padding: 6px; cursor: pointer; }
+.autoimport-select .ai-cell img { width: 100%; height: 90px; object-fit: cover; border-radius: 6px; background: #eee; }
+.autoimport-select .ai-cell input { width: 18px; height: 18px; }
+.autoimport-select .ai-name { font-size: 11px; color: #555; word-break: break-all; text-align: center; line-height: 1.3; }
 
 /* ボタン */
 .btn {

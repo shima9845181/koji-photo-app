@@ -129,10 +129,12 @@
       var dupCount = prepared.filter(function (x) { return existKeys[x.key]; }).length;
       busy0.close();
 
-      // 自動取込：重複は無言でスキップ、新規のみ取込
-      if (opts.autoSkipDup) {
+      // 自動取込：新規のみ抽出
+      if (opts.selectUI || opts.autoSkipDup) {
         var fresh = prepared.filter(function (x) { return !existKeys[x.key]; });
         if (!fresh.length) return 0;
+        // 一覧で選ばせてから取込（selectUI）／無言取込（autoSkipDup）
+        if (opts.selectUI) return showSelectDialog(fresh, proj, prepared.length - fresh.length);
         return doImport(fresh, proj, prepared.length - fresh.length, opts);
       }
 
@@ -191,6 +193,60 @@
       busy.close();
       if (!silent) UI.alert('取り込み中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
       else throw e;
+    });
+  }
+
+  /* 自動取込：新規写真をサムネ＋チェックで一覧表示し、選んだものだけ取り込む。
+     戻り値: Promise<取込枚数>（キャンセル時 0）。 */
+  function showSelectDialog(fresh, proj, skipped) {
+    return new Promise(function (resolve) {
+      var urls = [];
+      var wrap = document.createElement('div');
+      wrap.className = 'autoimport-select';
+      var cells = fresh.map(function (x, i) {
+        var url = URL.createObjectURL(x.file); urls.push(url);
+        return '<label class="ai-cell"><input type="checkbox" data-i="' + i + '" checked>' +
+          '<img src="' + url + '" alt=""><span class="ai-name">' + UI.esc(x.file.name) + '</span></label>';
+      }).join('');
+      wrap.innerHTML =
+        '<p class="note">新しい写真が ' + fresh.length + ' 枚見つかりました。取り込むものにチェックしてください（初期は全選択）。</p>' +
+        '<div class="ai-tools"><button class="btn btn-sm" id="aiAll">全選択</button>' +
+        '<button class="btn btn-sm" id="aiNone">全解除</button></div>' +
+        '<div class="ai-grid">' + cells + '</div>' +
+        '<div class="detail-actions"><button class="btn btn-primary btn-lg" id="aiImport">取り込む</button>' +
+        '<button class="btn btn-lg" id="aiCancel">キャンセル</button></div>';
+      var close = UI.modal(wrap, '自動取込：取り込む写真を選ぶ');
+      var grid = wrap.querySelector('.ai-grid');
+      var impBtn = wrap.querySelector('#aiImport');
+
+      function checkedIdx() {
+        return Array.prototype.filter.call(grid.querySelectorAll('input[data-i]'), function (c) { return c.checked; })
+          .map(function (c) { return +c.getAttribute('data-i'); });
+      }
+      function updateBtn() {
+        var n = checkedIdx().length;
+        impBtn.textContent = n ? ('この ' + n + ' 枚を取り込む') : '取り込む写真を選択';
+        impBtn.disabled = !n;
+      }
+      function setAll(v) {
+        Array.prototype.forEach.call(grid.querySelectorAll('input[data-i]'), function (c) { c.checked = v; });
+        updateBtn();
+      }
+      grid.addEventListener('change', updateBtn);
+      wrap.querySelector('#aiAll').onclick = function () { setAll(true); };
+      wrap.querySelector('#aiNone').onclick = function () { setAll(false); };
+      updateBtn();
+
+      function cleanup() { urls.forEach(function (u) { URL.revokeObjectURL(u); }); }
+      wrap.querySelector('#aiCancel').onclick = function () { cleanup(); close(); resolve(0); };
+      impBtn.onclick = function () {
+        var idx = checkedIdx();
+        if (!idx.length) return;
+        var selected = idx.map(function (i) { return fresh[i]; });
+        var excluded = (fresh.length - selected.length) + (skipped || 0);
+        cleanup(); close();
+        doImport(selected, proj, excluded).then(function (n) { resolve(n || 0); });
+      };
     });
   }
 

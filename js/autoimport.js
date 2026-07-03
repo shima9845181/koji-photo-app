@@ -24,21 +24,40 @@
       UI.alert('自動取込は パソコンの Google Chrome または Microsoft Edge でご利用ください。\n（iPad / iPhone のブラウザは未対応です）', '自動取込');
       return;
     }
-    Storage.getSetting(dirKey(proj.id), null).then(function (dir) {
+    Promise.all([
+      Storage.getSetting(dirKey(proj.id), null),
+      Storage.getSetting(cfgKey(proj.id), null)
+    ]).then(function (res) {
+      var dir = res[0], cfg = res[1] || { enabled: false };
       var has = !!dir;
-      var buttons = [{ key: 'pick', label: has ? '取込元フォルダを変更' : '取込元フォルダを選ぶ', primary: true }];
+      var on = has && cfg.enabled;
+      var buttons = [{ key: 'pick', label: has ? '取込元フォルダを変更' : '取込元フォルダを選ぶ', primary: !has }];
       if (has) {
+        buttons.push({ key: 'toggle', label: on ? '自動取込を OFF にする' : '自動取込を ON にする', primary: true });
         buttons.push({ key: 'now', label: '今すぐ新しい写真を確認' });
-        buttons.push({ key: 'off', label: '自動取込を解除' });
+        buttons.push({ key: 'remove', label: 'フォルダ設定を削除' });
       }
       buttons.push({ key: '__cancel', label: '閉じる' });
       UI.choose('工事「' + proj.name + '」の自動取込（PC専用）。\n' +
-        '選んだフォルダを、この工事を開くたびに確認し、新しい写真を自動で取り込みます。\n\n' +
-        '現在：' + (has ? '設定済み' : '未設定'), '⚙ 自動取込', buttons).then(function (k) {
+        '選んだフォルダを、この工事を開くたびに確認し、新しい写真を一覧から選んで取り込めます。\n\n' +
+        '現在：' + (has ? ('フォルダ設定済み ／ 自動取込 ' + (on ? 'ON' : 'OFF')) : '未設定'), '⚙ 自動取込', buttons).then(function (k) {
         if (k === 'pick') return pickFolder(proj);
+        if (k === 'toggle') return setEnabled(proj, !on);
         if (k === 'now') return run(proj, { manual: true });
-        if (k === 'off') return disable(proj.id);
+        if (k === 'remove') return removeConfig(proj.id);
       });
+    });
+  }
+
+  /* ON/OFF切替（フォルダ設定は保持）。ONにしたら即確認。 */
+  function setEnabled(proj, on) {
+    return Storage.getSetting(cfgKey(proj.id), { enabled: false, lastCheck: 0 }).then(function (cfg) {
+      cfg = cfg || { lastCheck: 0 };
+      cfg.enabled = on;
+      return Storage.setSetting(cfgKey(proj.id), cfg);
+    }).then(function () {
+      UI.toast(on ? '自動取込を ON にしました' : '自動取込を OFF にしました');
+      if (on) return run(proj, { manual: true });
     });
   }
 
@@ -56,10 +75,11 @@
     });
   }
 
-  function disable(pid) {
+  /* フォルダ設定ごと削除（解除） */
+  function removeConfig(pid) {
     return Storage.delete('settings', dirKey(pid)).catch(function () {}).then(function () {
       return Storage.setSetting(cfgKey(pid), { enabled: false, lastCheck: 0 });
-    }).then(function () { UI.toast('自動取込を解除しました'); });
+    }).then(function () { UI.toast('自動取込のフォルダ設定を削除しました'); });
   }
 
   /* ---- 工事を開いたときの確認（app.js から呼ぶ） ---- */
@@ -102,15 +122,15 @@
       if (!dir) { if (opts.manual) UI.alert('取込元フォルダが設定されていません。', '自動取込'); return; }
       var busy = opts.manual ? UI.busy('フォルダを確認中…') : null;
       return collectImages(dir).then(function (files) {
+        if (busy) { busy.close(); busy = null; }  // 選択ダイアログの前に閉じる
         var since = cfg.lastCheck || 0;
         // lastCheck 以降に更新されたファイルを優先（重複は importFiles 側でも除外）
         var candidates = files.filter(function (f) { return !since || (f.lastModified || 0) >= since - 60000; });
         var use = candidates.length ? candidates : files;
-        return global.App.Photos.importFiles(use, { autoSkipDup: true, projectId: proj.id }).then(function (added) {
-          if (busy) busy.close();
-          return Storage.setSetting(cfgKey(proj.id), { enabled: true, lastCheck: nowMs() }).then(function () {
-            if (added) UI.toast('自動取込：' + added + ' 枚を追加しました');
-            else if (opts.manual) UI.toast('新しい写真はありませんでした');
+        // 新規写真は一覧から選んで取込（selectUI）。取込トーストは importFiles 側で表示。
+        return global.App.Photos.importFiles(use, { selectUI: true, projectId: proj.id }).then(function (added) {
+          return Storage.setSetting(cfgKey(proj.id), { enabled: (cfg.enabled !== false), lastCheck: nowMs() }).then(function () {
+            if (!added && opts.manual) UI.toast('新しい写真はありませんでした');
           });
         });
       }).catch(function (e) {
@@ -134,6 +154,6 @@
 
   global.App = global.App || {};
   global.App.AutoImport = {
-    setup: setup, check: check, run: run, disable: disable
+    setup: setup, check: check, run: run, setEnabled: setEnabled, removeConfig: removeConfig
   };
 })(window);
