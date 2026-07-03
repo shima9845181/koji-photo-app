@@ -103,15 +103,17 @@
   /* ---- 取り込み ---- */
   function dupKey(name, size, takenAt) { return (name || '') + '|' + (size || 0) + '|' + (takenAt || ''); }
 
-  function importFiles(fileList) {
-    var proj = Projects.current();
-    if (!proj) { UI.alert('先に工事を作成・選択してください。', '工事が未選択'); return Promise.resolve(); }
+  function importFiles(fileList, opts) {
+    opts = opts || {};
+    var proj = opts.projectId ? { id: opts.projectId } : Projects.current();
+    if (opts.projectId) { /* 自動取込：現在の工事オブジェクトを取得（reload判定用） */ }
+    if (!proj) { if (!opts.autoSkipDup) UI.alert('先に工事を作成・選択してください。', '工事が未選択'); return Promise.resolve(); }
     var files = Array.prototype.slice.call(fileList).filter(function (f) {
       return f.type && f.type.indexOf('image/') === 0;
     });
-    if (!files.length) { UI.alert('画像ファイルが選択されていません。', '取り込み'); return Promise.resolve(); }
+    if (!files.length) { if (!opts.autoSkipDup) UI.alert('画像ファイルが選択されていません。', '取り込み'); return Promise.resolve(0); }
 
-    var busy0 = UI.busy('写真を確認中…');
+    var busy0 = opts.autoSkipDup ? { close: function () {} } : UI.busy('写真を確認中…');
     // 先に EXIF を読み、既存写真と「ファイル名＋サイズ＋撮影日時」で重複判定
     return Promise.all([
       Storage.getPhotosByProject(proj.id),
@@ -126,6 +128,13 @@
       existing.forEach(function (p) { existKeys[dupKey(p.fileName, p.blob && p.blob.size, p.takenAt)] = true; });
       var dupCount = prepared.filter(function (x) { return existKeys[x.key]; }).length;
       busy0.close();
+
+      // 自動取込：重複は無言でスキップ、新規のみ取込
+      if (opts.autoSkipDup) {
+        var fresh = prepared.filter(function (x) { return !existKeys[x.key]; });
+        if (!fresh.length) return 0;
+        return doImport(fresh, proj, prepared.length - fresh.length, opts);
+      }
 
       if (!dupCount) return doImport(prepared, proj, 0);
 
@@ -150,9 +159,12 @@
     });
   }
 
-  /* prepared: [{file,meta,key}] を直列で保存（先読みした meta を再利用） */
-  function doImport(prepared, proj, skipped) {
-    var busy = UI.busy('写真を取り込み中… (0/' + prepared.length + ')');
+  /* prepared: [{file,meta,key}] を直列で保存（先読みした meta を再利用）。
+     opts.autoSkipDup のときは busy/トーストを出さず、取込枚数を返す（呼び出し側で通知）。 */
+  function doImport(prepared, proj, skipped, opts) {
+    opts = opts || {};
+    var silent = !!opts.autoSkipDup;
+    var busy = silent ? { update: function () {}, close: function () {} } : UI.busy('写真を取り込み中… (0/' + prepared.length + ')');
     var done = 0;
     return prepared.reduce(function (chain, x) {
       return chain.then(function () {
@@ -173,11 +185,12 @@
       });
     }, Promise.resolve()).then(function () {
       busy.close();
-      UI.toast(done + ' 枚を取り込みました' + (skipped ? '（' + skipped + ' 枚は取込み済みでスキップ）' : ''));
-      return reload();
+      if (!silent) UI.toast(done + ' 枚を取り込みました' + (skipped ? '（' + skipped + ' 枚は取込み済みでスキップ）' : ''));
+      return reload().then(function () { return done; });
     }).catch(function (e) {
       busy.close();
-      UI.alert('取り込み中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
+      if (!silent) UI.alert('取り込み中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
+      else throw e;
     });
   }
 
@@ -523,6 +536,7 @@
     // ツールバー
     html += '<div class="toolbar">';
     html += '<button class="btn btn-primary btn-lg" id="btnImport">＋ 写真を取り込む</button>';
+    html += '<button class="btn" id="btnAutoImport" title="この工事の取込元フォルダを設定（PC専用）">⚙ 自動取込</button>';
     html += '<input id="fKeyword" class="input" placeholder="キーワード検索（工種・測点・内容…）" value="' + UI.esc(_filters.keyword) + '">';
     html += '<select id="fSort" class="input">' +
       '<option value="date_asc"' + (_filters.sort === 'date_asc' ? ' selected' : '') + '>撮影日時：古い順</option>' +
@@ -569,14 +583,24 @@
     // イベント
     var imp = document.getElementById('btnImport');
     if (imp) imp.onclick = pickFiles;
+    var ai = document.getElementById('btnAutoImport');
+    if (ai) ai.onclick = function () { if (global.App.AutoImport) global.App.AutoImport.setup(); };
     var fkey = document.getElementById('fKeyword');
     if (fkey) {
-      // 連続入力で止まらないよう、値は即時反映・再描画はデバウンス
-      fkey.oninput = function () {
+      // 再描画をデバウンス（連続入力で止まらない）
+      function scheduleKeywordRender() {
         _filters.keyword = fkey.value;
         if (_keywordTimer) clearTimeout(_keywordTimer);
-        _keywordTimer = setTimeout(function () { _keywordTimer = null; render(); }, 200);
-      };
+        _keywordTimer = setTimeout(function () { _keywordTimer = null; render(); }, 250);
+      }
+      // IME変換中（未確定）は検索しない。確定(compositionend)後に検索する
+      fkey.addEventListener('input', function (e) {
+        if (e && e.isComposing) return;   // 変換中は無視
+        scheduleKeywordRender();
+      });
+      fkey.addEventListener('compositionend', function () {
+        scheduleKeywordRender();          // 変換確定で検索
+      });
       // 再描画直後にフォーカス／キャレットを復元
       if (keepKey) {
         fkey.focus();

@@ -244,34 +244,74 @@
   function restoreData() {
     requireToken().then(function (t) {
       if (!t) return;
-      var busy = UI.busy('バックアップ一覧を取得中…');
-      listBackups().then(function (items) {
+      openBackupList();
+    });
+  }
+
+  /* バックアップ一覧 → 選択 → アクション（復元/削除）。削除後は一覧を開き直す。 */
+  function openBackupList() {
+    var busy = UI.busy('バックアップ一覧を取得中…');
+    return listBackups().then(function (items) {
+      busy.close();
+      if (!items.length) { return UI.alert('GitHubにバックアップがありません。\n先に「② バックアップ」を実行してください。', '復元'); }
+      items.sort(function (a, b) { return a.name < b.name ? -1 : 1; });
+      var buttons = items.slice(0, 16).map(function (it) {
+        return { key: it.path, label: prettyName(it.name) + '（約' + mb(it.size) + 'MB）' };
+      });
+      buttons.push({ key: '__cancel', label: 'キャンセル' });
+      return UI.choose('バックアップを選んでください。', 'GitHubから復元／削除', buttons).then(function (key) {
+        if (!key || key === '__cancel') return;
+        var it = null;
+        items.forEach(function (x) { if (x.path === key) it = x; });
+        if (!it) return;
+        return backupAction(it);
+      });
+    }).catch(function (e) {
+      busy.close();
+      UI.alert('一覧の取得に失敗しました。\n' + fmtErr(e), '復元');
+    });
+  }
+
+  /* 選んだバックアップに対する操作 */
+  function backupAction(it) {
+    return UI.choose('「' + prettyName(it.name) + '」をどうしますか？', 'バックアップ', [
+      { key: 'restore', label: 'このバックアップから復元', primary: true },
+      { key: 'delete', label: 'このバックアップを削除' },
+      { key: '__cancel', label: 'キャンセル' }
+    ]).then(function (act) {
+      if (act === 'restore') return doRestore(it);
+      if (act === 'delete') return deleteBackup(it);
+    });
+  }
+
+  function doRestore(it) {
+    var b2 = UI.busy('ダウンロード中…');
+    return fetchRawBlob(DATA_REPO, it.path).then(function (blob) {
+      return Backup.readZipMeta(blob).then(function (meta) {
+        b2.close();
+        return confirmAndImport(blob, meta);
+      });
+    }).catch(function (e) {
+      b2.close();
+      UI.alert('復元に失敗しました。\n' + fmtErr(e), '復元');
+    });
+  }
+
+  function deleteBackup(it) {
+    return UI.confirm('GitHub上のこのバックアップ「' + prettyName(it.name) + '」を削除します。\n' +
+      '（この端末内の写真・工事データには影響しません）\nよろしいですか？', 'バックアップの削除').then(function (ok) {
+      if (!ok) return;
+      var busy = UI.busy('削除中…');
+      return ghFetch('/repos/' + OWNER + '/' + DATA_REPO + '/contents/' + encPath(it.path), {
+        method: 'DELETE',
+        body: JSON.stringify({ message: 'delete backup: ' + it.name, sha: it.sha })
+      }).then(function () {
         busy.close();
-        if (!items.length) { return UI.alert('GitHubにバックアップがありません。\n先に「② バックアップ」を実行してください。', '復元'); }
-        items.sort(function (a, b) { return a.name < b.name ? -1 : 1; });
-        var buttons = items.slice(0, 16).map(function (it) {
-          return { key: it.path, label: prettyName(it.name) + '（約' + mb(it.size) + 'MB）', _it: it };
-        });
-        buttons.push({ key: '__cancel', label: 'キャンセル' });
-        return UI.choose('復元するバックアップを選んでください。\n※ 選ぶと内容を確認します。', 'GitHubから復元', buttons).then(function (key) {
-          if (!key || key === '__cancel') return;
-          var it = null;
-          items.forEach(function (x) { if (x.path === key) it = x; });
-          if (!it) return;
-          var b2 = UI.busy('ダウンロード中…');
-          return fetchRawBlob(DATA_REPO, it.path).then(function (blob) {
-            return Backup.readZipMeta(blob).then(function (meta) {
-              b2.close();
-              return confirmAndImport(blob, meta);
-            });
-          }).catch(function (e) {
-            b2.close();
-            UI.alert('復元に失敗しました。\n' + fmtErr(e), '復元');
-          });
-        });
+        UI.toast('バックアップを削除しました');
+        return openBackupList(); // 続けて操作できるよう一覧を開き直す
       }).catch(function (e) {
         busy.close();
-        UI.alert('一覧の取得に失敗しました。\n' + fmtErr(e), '復元');
+        UI.alert('削除に失敗しました。\n' + fmtErr(e), '削除');
       });
     });
   }

@@ -155,6 +155,8 @@
     }
     wireHeader();
     Projects.onChange(refreshHeader);
+    // 工事を開いたら自動取込フォルダを確認（PC・設定済みの工事のみ）
+    Projects.onChange(function (proj) { if (App.AutoImport) App.AutoImport.check(proj); });
     updateAppbarH();
     window.addEventListener('resize', updateAppbarH);
     setTimeout(updateAppbarH, 200); // フォント確定後に再計測
