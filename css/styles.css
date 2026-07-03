@@ -163,6 +163,9 @@ body {
 .modal-msg { font-size: 16px; line-height: 1.6; }
 .modal-body { margin: 8px 0; }
 .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 18px; }
+/* 複数選択ダイアログ（choose：GitHubメニュー等）は縦並び・全幅で押しやすく */
+.modal-actions-wrap { flex-direction: column; align-items: stretch; justify-content: flex-start; }
+.modal-actions-wrap .btn { width: 100%; text-align: center; padding: 11px 12px; }
 
 /* 入力フィールド */
 .field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }

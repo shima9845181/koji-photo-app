@@ -1,6 +1,7 @@
 /* backup.js  ---  工事ごとの書き出し／取り込み（zip）
    構成: meta.json（工事＋写真メタ）＋ photos/<id>.<ext>（原本・無加工）。
-   端末間の受け渡し・完了工事の退避に使う。写真は外部送信せずローカル完結。 */
+   端末間の受け渡し・完了工事の退避に使う。写真は外部送信せずローカル完結。
+   ※ github.js から buildProjectZip / importZip を再利用する。 */
 (function (global) {
   'use strict';
   var UI = global.App.UI;
@@ -24,21 +25,23 @@
     setTimeout(function () { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
   }
 
-  /* ---- 書き出し ---- */
-  function exportCurrent() {
-    var proj = Projects.current();
-    if (!proj) { UI.alert('先に工事を選択してください。', '書き出し'); return; }
-    var busy = UI.busy('書き出しファイルを作成中…');
-    Storage.getPhotosByProject(proj.id).then(function (photos) {
+  /* ---- zip 生成（書き出し／GitHubバックアップ共通） ----
+     戻り値: Promise<Blob>。meta.version=2、工事IDと写真の原IDを保持する。 */
+  function buildProjectZip(proj, onProgress) {
+    return Storage.getPhotosByProject(proj.id).then(function (photos) {
       var zip = new global.JSZip();
       var photoDir = zip.folder('photos');
       var meta = {
-        version: 1,
+        version: 2,
         exportedAt: Date.now(),
-        project: { name: proj.name, client: proj.client || '', createdAt: proj.createdAt },
+        project: {
+          id: proj.id,
+          name: proj.name,
+          client: proj.client || '',
+          createdAt: proj.createdAt
+        },
         photos: []
       };
-      var chain = Promise.resolve();
       photos.forEach(function (p) {
         var ext = extOf(p.fileName, p.blob && p.blob.type);
         var fname = p.id + '.' + ext;
@@ -51,11 +54,19 @@
         });
       });
       zip.file('meta.json', JSON.stringify(meta, null, 2));
-      return chain.then(function () {
-        return zip.generateAsync({ type: 'blob', compression: 'STORE' }, function (m) {
-          busy.update('書き出し中… ' + Math.round(m.percent) + '%');
-        });
+      return zip.generateAsync({ type: 'blob', compression: 'STORE' }, function (m) {
+        if (onProgress) onProgress(Math.round(m.percent));
       });
+    });
+  }
+
+  /* ---- 書き出し（ローカルファイルへ） ---- */
+  function exportCurrent() {
+    var proj = Projects.current();
+    if (!proj) { UI.alert('先に工事を選択してください。', '書き出し'); return; }
+    var busy = UI.busy('書き出しファイルを作成中…');
+    buildProjectZip(proj, function (pct) {
+      busy.update('書き出し中… ' + pct + '%');
     }).then(function (blob) {
       busy.close();
       download(blob, safeName(proj.name) + '_' + stamp() + '.zip');
@@ -66,7 +77,7 @@
     });
   }
 
-  /* ---- 取り込み ---- */
+  /* ---- 取り込み（ローカルファイルから・新規工事として） ---- */
   function importDialog() {
     var inp = document.createElement('input');
     inp.type = 'file'; inp.accept = '.zip,application/zip';
@@ -74,54 +85,110 @@
     inp.click();
   }
 
-  function importZip(file) {
+  /* ---- 取り込み本体 ----
+     opts.mode:
+       'new'（既定）      … 「〇〇（取込）」として別工事で追加（写真は新ID）
+       'overwrite'        … meta.project.id と同じ工事を上書き更新（写真は原ID・入替）
+                            旧v1（idなし）zipは自動的に 'new' へフォールバック
+     opts.silent が真ならトースト/リロードを呼び出し側に任せる（進捗UIは表示）。 */
+  function importZip(file, opts) {
+    opts = opts || {};
+    var mode = opts.mode || 'new';
     var busy = UI.busy('取り込み中…');
-    global.JSZip.loadAsync(file).then(function (zip) {
+    return global.JSZip.loadAsync(file).then(function (zip) {
       var metaFile = zip.file('meta.json');
       if (!metaFile) throw new Error('meta.json が見つかりません。当アプリで書き出した zip を指定してください。');
       return metaFile.async('string').then(function (txt) {
         var meta = JSON.parse(txt);
-        // 新しい工事として作成（既存と混ざらないよう別IDで取り込む）
-        return Projects.create(meta.project.name + '（取込）', meta.project.client).then(function (proj) {
-          var chain = Promise.resolve();
-          var count = 0;
-          meta.photos.forEach(function (pm) {
-            chain = chain.then(function () {
-              var f = zip.file(pm.file);
-              if (!f) return;
-              return f.async('blob').then(function (blob) {
-                return global.App.Exif.makeThumbnail(blob, 480).then(function (thumb) {
-                  return Storage.put('photos', {
-                    id: Storage.newId('ph'),
-                    projectId: proj.id,
-                    fileName: pm.fileName,
-                    blob: blob, thumbBlob: thumb,
-                    takenAt: pm.takenAt, lat: pm.lat, lng: pm.lng,
-                    koushu: pm.koushu || '', shubetsu: pm.shubetsu || '', saibetsu: pm.saibetsu || '',
-                    kubun: pm.kubun || '', spot: pm.spot || '', caption: pm.caption || '',
-                    importedAt: Date.now()
-                  });
-                });
-              }).then(function () { count++; busy.update('取り込み中… ' + count + '/' + meta.photos.length); });
-            });
-          });
-          return chain.then(function () { return proj; });
-        });
+        var hasId = meta.project && meta.project.id;
+        if (mode === 'overwrite' && hasId) {
+          return importOverwrite(zip, meta, busy);
+        }
+        return importAsNew(zip, meta, busy);
       });
     }).then(function (proj) {
-      return Projects.select(proj.id);
-    }).then(function () {
-      return global.App.History.init(); // 取り込んだ分類値を履歴へ反映
-    }).then(function () {
+      return Projects.select(proj.id).then(function () { return proj; });
+    }).then(function (proj) {
+      return global.App.History.init().then(function () { return proj; }); // 分類値を履歴へ反映
+    }).then(function (proj) {
       busy.close();
-      UI.toast('取り込みが完了しました');
-      global.App.Photos.reload();
+      if (!opts.silent) {
+        UI.toast('取り込みが完了しました');
+        global.App.Photos.reload();
+      }
+      return proj;
     }).catch(function (e) {
       busy.close();
+      if (opts.rethrow) throw e;
       UI.alert('取り込み中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
     });
   }
 
+  /* 新規工事として取り込み（従来動作） */
+  function importAsNew(zip, meta, busy) {
+    return Projects.create(meta.project.name + '（取込）', meta.project.client).then(function (proj) {
+      return putPhotos(zip, meta, proj.id, busy).then(function () { return proj; });
+    });
+  }
+
+  /* 同一IDの工事を上書き更新 */
+  function importOverwrite(zip, meta, busy) {
+    var pid = meta.project.id;
+    return Storage.get('projects', pid).then(function (existing) {
+      // 既存工事の他フィールドは温存しつつ、名称等を上書き
+      var proj = Object.assign({}, existing || {}, {
+        id: pid,
+        name: meta.project.name,
+        client: meta.project.client || '',
+        createdAt: meta.project.createdAt || (existing && existing.createdAt) || Date.now(),
+        updatedAt: Date.now()
+      });
+      return Storage.put('projects', proj).then(function () {
+        // 既存写真を全削除してから入れ替え（原IDのまま）
+        return Storage.getPhotosByProject(pid).then(function (olds) {
+          var del = Promise.resolve();
+          olds.forEach(function (o) { del = del.then(function () { return Storage.delete('photos', o.id); }); });
+          return del;
+        });
+      }).then(function () {
+        return putPhotos(zip, meta, pid, busy, /*keepId*/ true).then(function () { return proj; });
+      });
+    });
+  }
+
+  /* zip 内の写真を photos ストアへ書き込む。keepId=true なら meta の原IDを使う。 */
+  function putPhotos(zip, meta, projectId, busy, keepId) {
+    var chain = Promise.resolve();
+    var count = 0;
+    var total = (meta.photos || []).length;
+    (meta.photos || []).forEach(function (pm) {
+      chain = chain.then(function () {
+        var f = zip.file(pm.file);
+        if (!f) return;
+        return f.async('blob').then(function (blob) {
+          return global.App.Exif.makeThumbnail(blob, 480).then(function (thumb) {
+            return Storage.put('photos', {
+              id: keepId ? pm.id : Storage.newId('ph'),
+              projectId: projectId,
+              fileName: pm.fileName,
+              blob: blob, thumbBlob: thumb,
+              takenAt: pm.takenAt, lat: pm.lat, lng: pm.lng,
+              koushu: pm.koushu || '', shubetsu: pm.shubetsu || '', saibetsu: pm.saibetsu || '',
+              kubun: pm.kubun || '', spot: pm.spot || '', caption: pm.caption || '',
+              importedAt: pm.importedAt || Date.now()
+            });
+          });
+        }).then(function () { count++; busy.update('取り込み中… ' + count + '/' + total); });
+      });
+    });
+    return chain;
+  }
+
   global.App = global.App || {};
-  global.App.Backup = { exportCurrent: exportCurrent, importDialog: importDialog };
+  global.App.Backup = {
+    exportCurrent: exportCurrent,
+    importDialog: importDialog,
+    buildProjectZip: buildProjectZip,
+    importZip: importZip
+  };
 })(window);
