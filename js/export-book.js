@@ -41,27 +41,35 @@
     return 'photo';
   }
 
-  /* ---------- 共通：1エントリのテキスト行 ---------- */
-  function entryRows(p, projName) {
-    return [
-      ['工事名', projName],
-      ['工種 / 種別', [p.koushu, p.shubetsu].filter(Boolean).join(' / ') || '―'],
-      ['撮影区分', p.kubun || '―'],
-      ['測点（撮影箇所）', p.spot || '―'],
-      ['撮影年月日', fmtDate(p.takenAt)],
-      ['説明', p.caption || '―']
-    ];
+  /* ---------- 表示項目の定義（順序＝描画順・チェックで表示切替） ---------- */
+  var FIELD_DEFS = [
+    { key: 'projName', label: '現場名（工事名）', get: function (p, projName) { return projName || '―'; } },
+    { key: 'koushu', label: '工種', get: function (p) { return p.koushu || '―'; } },
+    { key: 'shubetsu', label: '種別', get: function (p) { return p.shubetsu || '―'; } },
+    { key: 'kubun', label: '撮影区分', get: function (p) { return p.kubun || '―'; } },
+    { key: 'spot', label: '撮影場所（測点）', get: function (p) { return p.spot || '―'; } },
+    { key: 'takenAt', label: '撮影年月日', get: function (p) { return fmtDate(p.takenAt); } },
+    { key: 'caption', label: '説明', get: function (p) { return p.caption || '―'; } }
+  ];
+  // fields 未指定なら全項目ON
+  function normFields(fields) {
+    if (!fields) { var all = {}; FIELD_DEFS.forEach(function (f) { all[f.key] = true; }); return all; }
+    return fields;
   }
-  /* 空欄コマ（手書き用）：項目名は残し値は空 */
-  function blankRows(projName) {
-    return [
-      ['工事名', projName || ''],
-      ['工種 / 種別', ''],
-      ['撮影区分', ''],
-      ['測点（撮影箇所）', ''],
-      ['撮影年月日', ''],
-      ['説明', '']
-    ];
+  function enabledDefs(fields) {
+    var fs = normFields(fields);
+    return FIELD_DEFS.filter(function (f) { return fs[f.key]; });
+  }
+
+  /* ---------- 共通：1エントリのテキスト行（チェックされた項目のみ） ---------- */
+  function entryRows(p, projName, fields) {
+    return enabledDefs(fields).map(function (f) { return [f.label, f.get(p, projName)]; });
+  }
+  /* 空欄コマ（手書き用）：項目名は残し値は空（現場名のみ値を入れる） */
+  function blankRows(projName, fields) {
+    return enabledDefs(fields).map(function (f) {
+      return [f.label, f.key === 'projName' ? (projName || '') : ''];
+    });
   }
 
   /* ================= PDF ================= */
@@ -77,11 +85,13 @@
     return lines;
   }
 
-  function drawEntry(ctx, x, y, w, h, img, rows) {
+  function drawEntry(ctx, x, y, w, h, img, rows, photoOnly) {
     // 枠
     ctx.strokeStyle = '#333'; ctx.lineWidth = 1.5; ctx.strokeRect(x, y, w, h);
     var pad = 14;
-    var imgW = Math.round(w * 0.54);
+    // 写真のみ（コメント欄なし）／項目が0件のときは画像を全幅表示
+    var noTable = photoOnly || !rows || !rows.length;
+    var imgW = noTable ? w : Math.round(w * 0.54);
     // 画像領域
     var ax = x + pad, ay = y + pad, aw = imgW - pad * 1.5, ah = h - pad * 2;
     if (img) {
@@ -91,6 +101,7 @@
     } else {
       ctx.fillStyle = '#eee'; ctx.fillRect(ax, ay, aw, ah);
     }
+    if (noTable) return; // 写真のみ（コメント欄なし）
     // 区切り線
     var tableX = x + imgW;
     ctx.beginPath(); ctx.moveTo(tableX, y); ctx.lineTo(tableX, y + h); ctx.stroke();
@@ -122,8 +133,10 @@
     ctx.textBaseline = 'top'; // 既定へ戻す
   }
 
-  /* 1ページを canvas に描いて返す（プレビュー・PDF 共用） */
-  function renderPageCanvas(slice, perPage, projName, headerTitle, pg, pages) {
+  /* 1ページを canvas に描いて返す（プレビュー・PDF 共用）
+     opts = { fields:{key:bool}, photoOnly:bool } */
+  function renderPageCanvas(slice, perPage, projName, headerTitle, pg, pages, opts) {
+    opts = opts || {};
     var W = 1240, H = 1754; // 150dpi A4
     var margin = 48, headerH = 70, footerH = 30;
     var canvas = document.createElement('canvas');
@@ -147,15 +160,15 @@
       for (var i = 0; i < slice.length; i++) {
         var y = top + i * (rowH + gap), it = slice[i], k = kindOf(it);
         if (k === 'text') drawTextRow(ctx, margin, y, W - margin * 2, rowH, it.text);
-        else if (k === 'blank') drawEntry(ctx, margin, y, W - margin * 2, rowH, null, blankRows(projName));
-        else drawEntry(ctx, margin, y, W - margin * 2, rowH, imgs[i], entryRows(it, projName));
+        else if (k === 'blank') drawEntry(ctx, margin, y, W - margin * 2, rowH, null, blankRows(projName, opts.fields), opts.photoOnly);
+        else drawEntry(ctx, margin, y, W - margin * 2, rowH, imgs[i], entryRows(it, projName, opts.fields), opts.photoOnly);
         if (imgs[i] && imgs[i].src) URL.revokeObjectURL(imgs[i].src);
       }
       return canvas;
     });
   }
 
-  function makePDF(photos, perPage, projName, headerTitle) {
+  function makePDF(photos, perPage, projName, headerTitle, opts) {
     headerTitle = headerTitle || projName;
     var jsPDFCtor = (global.jspdf && global.jspdf.jsPDF) || global.jsPDF;
     var doc = new jsPDFCtor({ unit: 'mm', format: 'a4', orientation: 'portrait' });
@@ -165,7 +178,7 @@
       (function (pg) {
         chain = chain.then(function () {
           var slice = photos.slice(pg * perPage, pg * perPage + perPage);
-          return renderPageCanvas(slice, perPage, projName, headerTitle, pg, pages).then(function (canvas) {
+          return renderPageCanvas(slice, perPage, projName, headerTitle, pg, pages, opts).then(function (canvas) {
             if (pg > 0) doc.addPage();
             doc.addImage(canvas.toDataURL('image/jpeg', 0.85), 'JPEG', 0, 0, 210, 297);
           });
@@ -176,7 +189,7 @@
   }
 
   /* プレビュー：全ページを縮小 canvas で container に並べる。isCurrent() が false になったら中断 */
-  function buildPreview(container, entries, perPage, projName, headerTitle, isCurrent) {
+  function buildPreview(container, entries, perPage, projName, headerTitle, isCurrent, opts) {
     var pages = Math.ceil(entries.length / perPage) || 1;
     var chain = Promise.resolve();
     for (var pg = 0; pg < pages; pg++) {
@@ -184,7 +197,7 @@
         chain = chain.then(function () {
           if (isCurrent && !isCurrent()) return;
           var slice = entries.slice(pg * perPage, pg * perPage + perPage);
-          return renderPageCanvas(slice, perPage, projName, headerTitle, pg, pages).then(function (canvas) {
+          return renderPageCanvas(slice, perPage, projName, headerTitle, pg, pages, opts).then(function (canvas) {
             if (isCurrent && !isCurrent()) return;
             if (pg === 0) container.innerHTML = '';
             var d = document.createElement('div'); d.className = 'pg';
@@ -200,7 +213,8 @@
   }
 
   /* ================= Excel ================= */
-  function makeExcel(photos, perPage, projName) {
+  function makeExcel(photos, perPage, projName, opts) {
+    opts = opts || {};
     var wb = new global.ExcelJS.Workbook();
     var ws = wb.addWorksheet('写真帳');
     ws.columns = [
@@ -227,8 +241,8 @@
           return;
         }
 
-        // photo / blank 共通：管理項目
-        var rows = (k === 'blank') ? blankRows(projName) : entryRows(it, projName);
+        // photo / blank 共通：管理項目（写真のみのときは項目を出さない）
+        var rows = opts.photoOnly ? [] : ((k === 'blank') ? blankRows(projName, opts.fields) : entryRows(it, projName, opts.fields));
         rows.forEach(function (kv, i) {
           var rowNo = startRow + i + 1;
           var bCell = ws.getCell('B' + rowNo);
@@ -271,35 +285,53 @@
       if (!entries.length) { UI.alert('写真がありません。', '写真帳出力'); return; }
       var headerTitle = proj.name + (label !== '全件' ? '　[' + label + ']' : '');
 
+      var fieldChecks = FIELD_DEFS.map(function (f) {
+        return '<label class="inline"><input type="checkbox" class="expField" data-key="' + f.key + '" checked> ' + UI.esc(f.label) + '</label>';
+      }).join('');
+
       var wrap = document.createElement('div');
       wrap.className = 'export-dialog';
       wrap.innerHTML =
         '<div class="export-controls">' +
-        '<label class="inline">レイアウト <select id="expPer" class="input"><option value="3">3枚 / ページ</option><option value="4">4枚 / ページ</option></select></label>' +
+        '<label class="inline">レイアウト <select id="expPer" class="input"><option value="2">2枚 / ページ</option><option value="3" selected>3枚 / ページ</option><option value="4">4枚 / ページ</option></select></label>' +
         '<label class="inline">形式 <select id="expFmt" class="input"><option value="pdf">PDF</option><option value="xlsx">Excel</option></select></label>' +
+        '<label class="inline"><input type="checkbox" id="expPhotoOnly"> 写真のみ（コメント欄なし）</label>' +
         '<span class="note">対象：' + UI.esc(label) + '（' + entries.length + ' 件）／ファイル名末尾に「ai」</span>' +
         '<button class="btn btn-primary btn-lg" id="expRun">出力する</button>' +
         '</div>' +
+        '<div class="export-fields" id="expFields"><span class="note">表示項目：</span>' + fieldChecks + '</div>' +
         '<div class="export-preview" id="expPreview"></div>';
       var close = UI.modal(wrap, '写真帳の出力（プレビュー）');
 
       var per = wrap.querySelector('#expPer'), fmt = wrap.querySelector('#expFmt'), prev = wrap.querySelector('#expPreview');
+      var photoOnly = wrap.querySelector('#expPhotoOnly');
+      var fieldEls = Array.prototype.slice.call(wrap.querySelectorAll('.expField'));
+
+      function readOpts() {
+        var fields = {};
+        fieldEls.forEach(function (cb) { fields[cb.getAttribute('data-key')] = cb.checked; });
+        return { fields: fields, photoOnly: photoOnly.checked };
+      }
       var _run = 0;
       function refresh() {
+        // 写真のみのときは項目チェックを無効化（グレー）
+        fieldEls.forEach(function (cb) { cb.disabled = photoOnly.checked; });
         var id = ++_run;
         prev.innerHTML = '<p class="note" style="padding:24px;text-align:center">プレビューを作成中…</p>';
-        buildPreview(prev, entries, parseInt(per.value, 10), proj.name, headerTitle, function () { return id === _run; });
+        buildPreview(prev, entries, parseInt(per.value, 10), proj.name, headerTitle, function () { return id === _run; }, readOpts());
       }
       per.onchange = refresh;
+      photoOnly.onchange = refresh;
+      fieldEls.forEach(function (cb) { cb.onchange = refresh; });
       refresh();
 
       wrap.querySelector('#expRun').onclick = function () {
-        var perPage = parseInt(per.value, 10), f = fmt.value;
+        var perPage = parseInt(per.value, 10), f = fmt.value, opts = readOpts();
         var base = safeName(proj.name) + '_写真帳_' + safeName(label) + '_' + today() + '_ai';
         var busy = UI.busy('写真帳を作成中…（枚数が多いと時間がかかります）');
         var task = (f === 'pdf')
-          ? makePDF(entries, perPage, proj.name, headerTitle).then(function (b) { download(b, base + '.pdf'); })
-          : makeExcel(entries, perPage, proj.name).then(function (b) { download(b, base + '.xlsx'); });
+          ? makePDF(entries, perPage, proj.name, headerTitle, opts).then(function (b) { download(b, base + '.pdf'); })
+          : makeExcel(entries, perPage, proj.name, opts).then(function (b) { download(b, base + '.xlsx'); });
         task.then(function () {
           busy.close(); close(); UI.toast('写真帳を出力しました');
         }).catch(function (e) {

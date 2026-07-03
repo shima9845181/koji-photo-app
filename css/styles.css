@@ -219,6 +219,9 @@ body {
 .export-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
 .export-controls .inline { display: inline-flex; align-items: center; gap: 6px; font-size: 14px; }
 .export-controls #expRun { margin-left: auto; }
+.export-fields { display: flex; align-items: center; gap: 6px 14px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 10px; background: #f4f6f9; border-radius: 8px; }
+.export-fields .inline { display: inline-flex; align-items: center; gap: 5px; font-size: 14px; }
+.export-fields .expField:disabled + span, .export-fields label:has(.expField:disabled) { color: #aaa; }
 .export-preview { max-height: 62vh; overflow: auto; background: #e9edf2; padding: 12px; border-radius: 8px; }
 .export-preview .pg { max-width: 440px; margin: 0 auto 16px; }
 .export-preview canvas { width: 100%; display: block; box-shadow: 0 2px 10px rgba(0,0,0,.25); background: #fff; }
