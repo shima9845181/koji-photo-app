@@ -419,6 +419,7 @@
         '<button class="btn" id="btnSelEdit">選択をまとめて入力</button>' +
         '<button class="btn btn-primary" id="btnSelExport">選択した写真で写真帳</button>' +
         '<button class="btn" id="btnSelAlbum">選択をアルバムに保存</button>' +
+        '<button class="btn" id="btnSelMoveCopy">別の工事へコピー／移動</button>' +
         '<button class="btn btn-danger" id="btnSelDelete">選択を削除</button>' +
         '</div>';
     }
@@ -601,6 +602,12 @@
     };
     var del = document.getElementById('btnSelDelete');
     if (del) del.onclick = function () { deletePhotos(selectedPhotos()); };
+    var mvc = document.getElementById('btnSelMoveCopy');
+    if (mvc) mvc.onclick = function () {
+      var sel = selectedPhotos();
+      if (!sel.length) { UI.alert('写真が選択されていません。サムネイルのチェックで選んでください。', 'コピー／移動'); return; }
+      openMoveCopy(sel);
+    };
     var alb = document.getElementById('btnSelAlbum');
     if (alb) alb.onclick = function () {
       var sel = selectedPhotos();
@@ -690,6 +697,110 @@
         busy.close();
         UI.alert('削除中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
       });
+    });
+  }
+
+  /* 選択写真を別の工事へコピー／移動。写真の全情報を引き継ぐ。Undo対応。 */
+  function openMoveCopy(list) {
+    var cur = Projects.current();
+    Projects.list().then(function (all) {
+      var others = all.filter(function (pj) { return !cur || pj.id !== cur.id; });
+      var wrap = document.createElement('div');
+      wrap.className = 'detail-form';
+      var opts = '<option value="">（移動先の工事を選択）</option>' +
+        '<option value="__new__">＋ 新しい工事を作成…</option>';
+      others.forEach(function (pj) {
+        opts += '<option value="' + UI.esc(pj.id) + '">' + UI.esc(pj.name) + '</option>';
+      });
+      wrap.innerHTML =
+        '<p class="note">選択した ' + list.length + ' 枚を、別の工事へコピー／移動します（工種・説明・撮影日時・位置情報などの情報もそのまま引き継ぎます）。</p>' +
+        '<label class="field"><span>移動先の工事</span>' +
+        '<select id="mcTarget">' + opts + '</select></label>' +
+        '<p class="note" id="mcHint" style="min-height:1.2em"></p>' +
+        '<div class="detail-actions" style="display:flex;gap:10px;flex-wrap:wrap">' +
+        '<button class="btn btn-primary btn-lg" id="mcCopy">コピーする（元は残す）</button>' +
+        '<button class="btn btn-lg" id="mcMove">移動する（元から消す）</button>' +
+        '</div>';
+      var close = UI.modal(wrap, '別の工事へコピー／移動');
+      var sel = wrap.querySelector('#mcTarget');
+      var hint = wrap.querySelector('#mcHint');
+      sel.onchange = function () {
+        hint.textContent = (sel.value === '__new__') ? '「新しい工事を作成」を選択中：実行時に工事名を入力します。' : '';
+      };
+
+      // 移動先ID（新規なら作成）を解決
+      function resolveTarget() {
+        var v = sel.value;
+        if (!v) { UI.alert('移動先の工事を選んでください。', 'コピー／移動'); return Promise.resolve(null); }
+        if (v === '__new__') {
+          return UI.prompt('新しい工事を作成', [
+            { name: 'name', label: '工事名', placeholder: '例：○○地内 電気設備工事' },
+            { name: 'client', label: '発注者（任意）', placeholder: '例：京都府 / 民間 / 自社' }
+          ]).then(function (val) {
+            if (!val || !val.name) return null;
+            return Projects.create(val.name, val.client).then(function (p) { return p; });
+          });
+        }
+        // 既存工事オブジェクトを返す
+        var found = null;
+        others.forEach(function (pj) { if (pj.id === v) found = pj; });
+        return Promise.resolve(found);
+      }
+
+      function doCopy() {
+        resolveTarget().then(function (target) {
+          if (!target) return;
+          var busy = UI.busy('コピー中…');
+          var copies = [];
+          list.reduce(function (chain, p) {
+            return chain.then(function () {
+              var copy = Object.assign({}, p, {
+                id: Storage.newId('ph'),
+                projectId: target.id,
+                importedAt: Date.now()
+              });
+              copies.push(copy);
+              return Storage.put('photos', copy);
+            });
+          }, Promise.resolve()).then(function () {
+            undoRecord(copies.map(function (c) { return { key: c.id, before: null, after: snap(c) }; }));
+            busy.close(); close();
+            UI.toast(list.length + ' 枚を「' + target.name + '」へコピーしました');
+            reload();
+          }).catch(function (e) {
+            busy.close();
+            UI.alert('コピー中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
+          });
+        });
+      }
+
+      function doMove() {
+        resolveTarget().then(function (target) {
+          if (!target) return;
+          UI.confirm(list.length + ' 枚を「' + target.name + '」へ移動します。\n（この工事からは無くなります。戻るボタンで元に戻せます）', '移動の確認').then(function (ok) {
+            if (!ok) return;
+            var before = list.map(snap);
+            var busy = UI.busy('移動中…');
+            list.reduce(function (chain, p) {
+              return chain.then(function () {
+                p.projectId = target.id;
+                return Storage.put('photos', p).then(function () { delete _selected[p.id]; });
+              });
+            }, Promise.resolve()).then(function () {
+              undoRecord(list.map(function (p, i) { return { key: p.id, before: before[i], after: snap(p) }; }));
+              busy.close(); close();
+              UI.toast(list.length + ' 枚を「' + target.name + '」へ移動しました');
+              reload();
+            }).catch(function (e) {
+              busy.close();
+              UI.alert('移動中にエラーが発生しました。\n' + (e && e.message ? e.message : e), 'エラー');
+            });
+          });
+        });
+      }
+
+      wrap.querySelector('#mcCopy').onclick = doCopy;
+      wrap.querySelector('#mcMove').onclick = doMove;
     });
   }
 
