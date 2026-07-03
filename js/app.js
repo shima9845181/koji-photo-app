@@ -90,6 +90,7 @@
     document.getElementById('btnBackup').onclick = function () { App.Backup.exportCurrent(); };
     document.getElementById('btnImportZip').onclick = function () { App.Backup.importDialog(); };
     document.getElementById('btnGithub').onclick = function () { App.Github.openMenu(); };
+    document.getElementById('btnMobile').onclick = function () { App.Github.openMobile(); };
 
     // ヘッダの工事名クリックで名称変更（現在の工事）
     var pj = document.querySelector('.appbar-project');

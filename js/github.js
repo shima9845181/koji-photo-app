@@ -429,12 +429,64 @@
     });
   }
 
+  /* ---------- スマホで開く（公開URL表示＋コピー＋QR） ---------- */
+  function copyUrl(text) {
+    if (global.navigator && navigator.clipboard && navigator.clipboard.writeText) {
+      return navigator.clipboard.writeText(text).then(function () { return true; }).catch(function () { return fallbackCopy(text); });
+    }
+    return Promise.resolve(fallbackCopy(text));
+  }
+  function fallbackCopy(text) {
+    try {
+      var ta = document.createElement('textarea');
+      ta.value = text; ta.style.position = 'fixed'; ta.style.top = '-1000px'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.focus(); ta.select();
+      try { ta.setSelectionRange(0, text.length); } catch (e) {}
+      var okc = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return okc;
+    } catch (e) { return false; }
+  }
+
+  function openMobile() {
+    var url = PAGES_URL;
+    var wrap = document.createElement('div');
+    wrap.className = 'mobile-share';
+    var qrHtml = '';
+    if (global.qrcode) {
+      try {
+        var qr = global.qrcode(0, 'M');
+        qr.addData(url);
+        qr.make();
+        qrHtml = '<div class="mobile-qr">' + qr.createImgTag(6, 8, 'QRコード') + '</div>';
+      } catch (e) { qrHtml = ''; }
+    }
+    wrap.innerHTML =
+      '<p class="note">スマホのカメラで下のQRコードを読み取るか、URLをコピーしてスマホのブラウザで開いてください。<br>' +
+      '（写真データはこの端末に保存されます。別端末とは「GitHub」→バックアップ／復元で受け渡しできます）</p>' +
+      qrHtml +
+      '<div class="mobile-url" id="mobileUrl">' + UI.esc(url) + '</div>' +
+      '<div class="detail-actions" style="justify-content:center">' +
+      '<button class="btn btn-primary btn-lg" id="mobileCopy">URLをコピー</button>' +
+      '<button class="btn btn-lg" id="mobileOpen">このPCで開く</button>' +
+      '</div>';
+    UI.modal(wrap, 'スマホで開く');
+    wrap.querySelector('#mobileCopy').onclick = function () {
+      Promise.resolve(copyUrl(url)).then(function (okc) {
+        if (okc) UI.toast('URLをコピーしました');
+        else UI.alert('自動コピーできませんでした。URLを長押し／範囲選択してコピーしてください。\n\n' + url, 'コピー');
+      });
+    };
+    wrap.querySelector('#mobileOpen').onclick = function () { global.open(url, '_blank'); };
+  }
+
   global.App = global.App || {};
   global.App.Github = {
     openMenu: openMenu,
     settings: settings,
     backupData: backupData,
     restoreData: restoreData,
-    deployApp: deployApp
+    deployApp: deployApp,
+    openMobile: openMobile
   };
 })(window);
