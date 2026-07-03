@@ -17,6 +17,10 @@ body {
 .appbar-project:hover { background: rgba(255,255,255,.28); }
 .appbar-project span { font-weight: bold; }
 .appbar-actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+/* ヘッダ開閉トグル（▽/△）とたたんだ状態 */
+.appbar-toggle { font-size: 18px; line-height: 1; color: #fff; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.4); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
+.appbar-toggle:hover { background: rgba(255,255,255,.30); }
+.appbar.collapsed .appbar-actions { display: none; }
 
 /* ボタン */
 .btn {
@@ -35,7 +39,7 @@ body {
 /* メイン */
 /* 2カラム（左：分類フィルタ／右：一覧） */
 .layout { display: flex; align-items: flex-start; }
-.sidebar { width: 240px; flex: 0 0 240px; background: #fff; border-right: 1px solid #e2e6ec; padding: 12px; position: sticky; top: var(--appbar-h, 60px); max-height: calc(100vh - var(--appbar-h, 60px)); overflow: auto; }
+.sidebar { width: 240px; flex: 0 0 240px; background: #fff; border-right: 1px solid #e2e6ec; padding: 12px; position: sticky; top: var(--appbar-h, 56px); max-height: calc(100vh - var(--appbar-h, 56px)); overflow: auto; }
 .main { padding: 18px; flex: 1; min-width: 0; }
 /* ツールバー＋選択バーを画面上部（ヘッダ直下）に固定 */
 .main-controls { position: sticky; top: var(--appbar-h, 56px); z-index: 40; background: #f0f2f5; margin: -18px -18px 10px; padding: 10px 18px 6px; box-shadow: 0 5px 6px -5px rgba(0,0,0,.25); }

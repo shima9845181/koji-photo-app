@@ -15,6 +15,21 @@
     if (a) document.documentElement.style.setProperty('--appbar-h', a.offsetHeight + 'px');
   }
 
+  /* ヘッダのボタン群を▽/△で開閉。畳んだら高さ変数を更新して固定バーを追従させる */
+  function applyHeaderCollapsed(collapsed) {
+    var a = document.querySelector('.appbar');
+    var btn = document.getElementById('btnHeaderToggle');
+    if (!a) return;
+    if (collapsed) a.classList.add('collapsed'); else a.classList.remove('collapsed');
+    if (btn) {
+      btn.textContent = collapsed ? '▽' : '△';        // 畳=▽(開く) / 展開=△(閉じる)
+      btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+      btn.title = collapsed ? 'メニューを表示' : 'メニューを隠す';
+    }
+    // レイアウト確定後に高さ再計算
+    global.requestAnimationFrame(function () { updateAppbarH(); });
+  }
+
   /* 工事名（・発注者）の変更 */
   function renameProject(proj) {
     if (!proj) return Promise.resolve(null);
@@ -91,6 +106,13 @@
     document.getElementById('btnImportZip').onclick = function () { App.Backup.importDialog(); };
     document.getElementById('btnGithub').onclick = function () { App.Github.openMenu(); };
     document.getElementById('btnMobile').onclick = function () { App.Github.openMobile(); };
+    // ヘッダのボタン群を▽/△で開閉（状態は記憶）
+    var hToggle = document.getElementById('btnHeaderToggle');
+    if (hToggle) hToggle.onclick = function () {
+      var collapsed = !document.querySelector('.appbar').classList.contains('collapsed');
+      applyHeaderCollapsed(collapsed);
+      App.Storage.setSetting('headerCollapsed', collapsed);
+    };
 
     // ヘッダの工事名クリックで名称変更（現在の工事）
     var pj = document.querySelector('.appbar-project');
@@ -134,6 +156,8 @@
     updateAppbarH();
     window.addEventListener('resize', updateAppbarH);
     setTimeout(updateAppbarH, 200); // フォント確定後に再計測
+    // ヘッダの畳み状態を復元
+    App.Storage.getSetting('headerCollapsed', false).then(function (c) { applyHeaderCollapsed(!!c); });
     // 入力履歴（全工事共通）を先に構築してから画面を初期化
     App.History.init().then(function () {
       Photos.mount(document.getElementById('main'), document.getElementById('sidebar'));
