@@ -104,7 +104,7 @@
         if (mode === 'overwrite' && hasId) {
           return importOverwrite(zip, meta, busy);
         }
-        return importAsNew(zip, meta, busy);
+        return importAsNew(zip, meta, busy, opts.newName);
       });
     }).then(function (proj) {
       return Projects.select(proj.id).then(function () { return proj; });
@@ -124,9 +124,19 @@
     });
   }
 
-  /* 新規工事として取り込み（従来動作） */
-  function importAsNew(zip, meta, busy) {
-    return Projects.create(meta.project.name + '（取込）', meta.project.client).then(function (proj) {
+  /* zip の meta.json だけを読む（復元前に工事名/IDを知るため） */
+  function readZipMeta(file) {
+    return global.JSZip.loadAsync(file).then(function (zip) {
+      var metaFile = zip.file('meta.json');
+      if (!metaFile) throw new Error('meta.json が見つかりません。当アプリで書き出した zip を指定してください。');
+      return metaFile.async('string').then(function (txt) { return JSON.parse(txt); });
+    });
+  }
+
+  /* 新規工事として取り込み（従来動作）。newName があればその名前で作成 */
+  function importAsNew(zip, meta, busy, newName) {
+    var name = (newName && newName.trim()) ? newName.trim() : (meta.project.name + '（取込）');
+    return Projects.create(name, meta.project.client).then(function (proj) {
       return putPhotos(zip, meta, proj.id, busy).then(function () { return proj; });
     });
   }
@@ -189,6 +199,7 @@
     exportCurrent: exportCurrent,
     importDialog: importDialog,
     buildProjectZip: buildProjectZip,
-    importZip: importZip
+    importZip: importZip,
+    readZipMeta: readZipMeta
   };
 })(window);

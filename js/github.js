@@ -253,15 +253,17 @@
           return { key: it.path, label: prettyName(it.name) + '（約' + mb(it.size) + 'MB）', _it: it };
         });
         buttons.push({ key: '__cancel', label: 'キャンセル' });
-        return UI.choose('復元するバックアップを選んでください。\n※ 同じ工事は上書き更新されます（コピーは増えません）。', 'GitHubから復元', buttons).then(function (key) {
+        return UI.choose('復元するバックアップを選んでください。\n※ 選ぶと内容を確認します。', 'GitHubから復元', buttons).then(function (key) {
           if (!key || key === '__cancel') return;
           var it = null;
           items.forEach(function (x) { if (x.path === key) it = x; });
           if (!it) return;
           var b2 = UI.busy('ダウンロード中…');
           return fetchRawBlob(DATA_REPO, it.path).then(function (blob) {
-            b2.close();
-            return Backup.importZip(blob, { mode: 'overwrite' });
+            return Backup.readZipMeta(blob).then(function (meta) {
+              b2.close();
+              return confirmAndImport(blob, meta);
+            });
           }).catch(function (e) {
             b2.close();
             UI.alert('復元に失敗しました。\n' + fmtErr(e), '復元');
@@ -271,6 +273,48 @@
         busy.close();
         UI.alert('一覧の取得に失敗しました。\n' + fmtErr(e), '復元');
       });
+    });
+  }
+
+  /* 復元前の確認：既存工事と衝突すれば上書き警告＋別名取込みの選択 */
+  function confirmAndImport(blob, meta) {
+    var name = (meta && meta.project && meta.project.name) || '（無題）';
+    var pid = (meta && meta.project && meta.project.id) || null;
+    var existsCheck = pid ? Storage.get('projects', pid) : Promise.resolve(null);
+    return existsCheck.then(function (existing) {
+      if (existing) {
+        // 衝突あり：上書きは元データを消す（不可逆）
+        return UI.choose(
+          'この工事「' + name + '」は既にこの端末にあります。\n' +
+          '「上書きして復元」を選ぶと、今この端末にある「' + name + '」の写真・分類は消えて、GitHubの内容に置き換わります（元に戻せません）。',
+          '復元の確認', [
+            { key: 'overwrite', label: '上書きして復元（現在の内容を消す）', primary: false },
+            { key: 'rename', label: '別名で新しい工事として取り込む' },
+            { key: '__cancel', label: 'キャンセル' }
+          ]).then(function (k) { return runImport(k, blob, meta, name); });
+      }
+      // 衝突なし：警告不要
+      return UI.choose(
+        'バックアップ「' + name + '」を復元します。',
+        '復元', [
+          { key: 'overwrite', label: '復元する', primary: true },
+          { key: 'rename', label: '別名で新しい工事として取り込む' },
+          { key: '__cancel', label: 'キャンセル' }
+        ]).then(function (k) { return runImport(k, blob, meta, name); });
+    });
+  }
+
+  function runImport(key, blob, meta, name) {
+    if (!key || key === '__cancel') return;
+    if (key === 'overwrite') {
+      return Backup.importZip(blob, { mode: 'overwrite' });
+    }
+    // rename：新しい工事名を入力して別工事として取り込む（元は残る）
+    return UI.prompt('別名で取り込む', [
+      { name: 'name', label: '新しい工事名', value: name + '（復元）', placeholder: '例：' + name + '（復元）' }
+    ]).then(function (v) {
+      if (!v || !v.name || !v.name.trim()) return;
+      return Backup.importZip(blob, { mode: 'new', newName: v.name.trim() });
     });
   }
 
