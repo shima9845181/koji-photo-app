@@ -1,0 +1,13 @@
+# OS が自動生成するファイル
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+._*
+
+# エディタ・一時ファイル
+*.tmp
+*.bak
+*~
+.vscode/

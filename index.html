@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>工事写真 管理アプリ</title>
+  <link rel="stylesheet" href="lib/leaflet.css">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <header class="appbar">
+    <div class="appbar-title">工事写真 管理</div>
+    <div class="appbar-project">
+      工事：<span id="currentProject">（工事が未選択）</span>
+    </div>
+    <div class="appbar-actions">
+      <button class="btn" id="btnProjects">工事の選択</button>
+      <button class="btn" id="btnNewProject">＋ 新規工事</button>
+      <button class="btn" id="btnUndo" disabled title="元に戻す（Ctrl+Z）">↶ 戻る</button>
+      <button class="btn" id="btnRedo" disabled title="やり直す（Ctrl+Y）">↷ 進む</button>
+      <button class="btn" id="btnAlbums">アルバム</button>
+      <button class="btn" id="btnExportBook">写真帳を出力</button>
+      <button class="btn" id="btnBackup">書き出し</button>
+      <button class="btn" id="btnImportZip">取り込み</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside id="sidebar" class="sidebar"></aside>
+    <main id="main" class="main"></main>
+  </div>
+
+  <!-- 同梱ライブラリ（オフライン動作・classic script） -->
+  <script src="lib/exifr.umd.js"></script>
+  <script src="lib/jspdf.umd.min.js"></script>
+  <script src="lib/exceljs.min.js"></script>
+  <script src="lib/jszip.min.js"></script>
+  <script src="lib/leaflet.js"></script>
+
+  <!-- アプリ本体（読み込み順に依存関係あり） -->
+  <script src="js/storage.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/undo.js"></script>
+  <script src="js/exif.js"></script>
+  <script src="js/map.js"></script>
+  <script src="js/history.js"></script>
+  <script src="js/projects.js"></script>
+  <script src="js/photos.js"></script>
+  <script src="js/albums.js"></script>
+  <script src="js/export-book.js"></script>
+  <script src="js/backup.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
