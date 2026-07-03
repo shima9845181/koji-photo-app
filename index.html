@@ -3,9 +3,10 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Cache-Control" content="no-cache">
   <title>工事写真 管理アプリ</title>
   <link rel="stylesheet" href="lib/leaflet.css">
-  <link rel="stylesheet" href="css/styles.css">
+  <link rel="stylesheet" href="css/styles.css?v=20260703a">
 </head>
 <body>
   <header class="appbar">
@@ -41,19 +42,19 @@
   <script src="lib/leaflet.js"></script>
   <script src="lib/qrcode.js"></script>
 
-  <!-- アプリ本体（読み込み順に依存関係あり） -->
-  <script src="js/storage.js"></script>
-  <script src="js/ui.js"></script>
-  <script src="js/undo.js"></script>
-  <script src="js/exif.js"></script>
-  <script src="js/map.js"></script>
-  <script src="js/history.js"></script>
-  <script src="js/projects.js"></script>
-  <script src="js/photos.js"></script>
-  <script src="js/albums.js"></script>
-  <script src="js/export-book.js"></script>
-  <script src="js/backup.js"></script>
-  <script src="js/github.js"></script>
-  <script src="js/app.js"></script>
+  <!-- アプリ本体（読み込み順に依存関係あり）。?v= は更新のたび切替えてキャッシュを無効化 -->
+  <script src="js/storage.js?v=20260703a"></script>
+  <script src="js/ui.js?v=20260703a"></script>
+  <script src="js/undo.js?v=20260703a"></script>
+  <script src="js/exif.js?v=20260703a"></script>
+  <script src="js/map.js?v=20260703a"></script>
+  <script src="js/history.js?v=20260703a"></script>
+  <script src="js/projects.js?v=20260703a"></script>
+  <script src="js/photos.js?v=20260703a"></script>
+  <script src="js/albums.js?v=20260703a"></script>
+  <script src="js/export-book.js?v=20260703a"></script>
+  <script src="js/backup.js?v=20260703a"></script>
+  <script src="js/github.js?v=20260703a"></script>
+  <script src="js/app.js?v=20260703a"></script>
 </body>
 </html>

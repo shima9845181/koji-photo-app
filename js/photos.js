@@ -22,6 +22,7 @@
   var _groupByDate = false;     // 撮影日でまとめて表示
   var _drafts = {};             // 編集途中（下書き）がある写真ID
   var _dragIds = null;          // ドラッグ中の写真ID配列（サイドバーへD&Dで分類反映）
+  var _keywordTimer = null;     // キーワード検索の再描画デバウンス
   var _regCombos = [];          // 呼び出した分類の組合せ（写真に紐づかない・件数0でサイドバー表示）
 
   function regFacetKey(id) { return 'regFacets_' + id; }
@@ -558,13 +559,30 @@
       html += '</div>';
     }
 
+    // キーワード入力中はフォーカス／キャレット位置を控えておく（再描画で外れないように）
+    var ae = document.activeElement;
+    var keepKey = ae && ae.id === 'fKeyword';
+    var caret = keepKey ? { s: ae.selectionStart, e: ae.selectionEnd } : null;
+
     _container.innerHTML = html;
 
     // イベント
     var imp = document.getElementById('btnImport');
     if (imp) imp.onclick = pickFiles;
     var fkey = document.getElementById('fKeyword');
-    if (fkey) fkey.oninput = function () { _filters.keyword = fkey.value; render(); };
+    if (fkey) {
+      // 連続入力で止まらないよう、値は即時反映・再描画はデバウンス
+      fkey.oninput = function () {
+        _filters.keyword = fkey.value;
+        if (_keywordTimer) clearTimeout(_keywordTimer);
+        _keywordTimer = setTimeout(function () { _keywordTimer = null; render(); }, 200);
+      };
+      // 再描画直後にフォーカス／キャレットを復元
+      if (keepKey) {
+        fkey.focus();
+        try { fkey.setSelectionRange(caret.s, caret.e); } catch (e) {}
+      }
+    }
     var fs = document.getElementById('fSort');
     if (fs) fs.onchange = function () { _filters.sort = fs.value; render(); };
     var fg = document.getElementById('fGroupDate');

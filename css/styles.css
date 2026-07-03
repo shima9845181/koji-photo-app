@@ -21,6 +21,8 @@ body {
 .appbar-toggle { font-size: 18px; line-height: 1; color: #fff; background: rgba(255,255,255,.18); border: 1px solid rgba(255,255,255,.4); border-radius: 8px; padding: 8px 12px; cursor: pointer; }
 .appbar-toggle:hover { background: rgba(255,255,255,.30); }
 .appbar.collapsed .appbar-actions { display: none; }
+/* 開閉トグルで下のツールバー（＋写真を取り込む/検索/選択バー）も収納 */
+.ui-collapsed .main-controls { display: none; }
 
 /* ボタン */
 .btn {

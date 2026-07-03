@@ -50,31 +50,77 @@
     });
   }
 
+  /* ---- Blob ⇄ ArrayBuffer 透過変換 ----
+     Safari/WebKit は IndexedDB に Blob/File を直接保存すると壊れるため、
+     保存時に ArrayBuffer 化（dehydrate）、読み出し時に Blob へ復元（hydrate）する。 */
+  function isBlob(v) { return (typeof Blob !== 'undefined' && v instanceof Blob); }
+  function isMarker(v) { return v && typeof v === 'object' && v.__blob === true && v.buf; }
+
+  function blobToBuffer(blob) {
+    if (blob.arrayBuffer) return blob.arrayBuffer();
+    return new Promise(function (resolve, reject) {
+      var fr = new FileReader();
+      fr.onload = function () { resolve(fr.result); };
+      fr.onerror = function () { reject(fr.error || new Error('read error')); };
+      fr.readAsArrayBuffer(blob);
+    });
+  }
+
+  /* 値のトップレベルにある Blob/File を {__blob,buf,type,name} へ。元は壊さずコピーを返す（Promise）。 */
+  function dehydrate(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return Promise.resolve(value);
+    var out = {}, jobs = [];
+    Object.keys(value).forEach(function (k) {
+      var v = value[k];
+      if (isBlob(v)) {
+        jobs.push(blobToBuffer(v).then(function (buf) {
+          out[k] = { __blob: true, buf: buf, type: v.type || '', name: (v.name || '') };
+        }));
+      } else {
+        out[k] = v;
+      }
+    });
+    return Promise.all(jobs).then(function () { return out; });
+  }
+
+  /* {__blob,...} マーカーを Blob へ復元。生Blob(旧データ)や通常値はそのまま。 */
+  function hydrate(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+    Object.keys(value).forEach(function (k) {
+      var v = value[k];
+      if (isMarker(v)) value[k] = new Blob([v.buf], { type: v.type || '' });
+    });
+    return value;
+  }
+  function hydrateAll(rows) { return (rows || []).map(hydrate); }
+
   var Storage = {
     /* 汎用 CRUD */
     put: function (store, value) {
-      return tx(store, 'readwrite').then(function (os) { return reqToPromise(os.put(value)); });
+      return dehydrate(value).then(function (v) {
+        return tx(store, 'readwrite').then(function (os) { return reqToPromise(os.put(v)); });
+      });
     },
     get: function (store, key) {
-      return tx(store, 'readonly').then(function (os) { return reqToPromise(os.get(key)); });
+      return tx(store, 'readonly').then(function (os) { return reqToPromise(os.get(key)); }).then(hydrate);
     },
     delete: function (store, key) {
       return tx(store, 'readwrite').then(function (os) { return reqToPromise(os.delete(key)); });
     },
     getAll: function (store) {
-      return tx(store, 'readonly').then(function (os) { return reqToPromise(os.getAll()); });
+      return tx(store, 'readonly').then(function (os) { return reqToPromise(os.getAll()); }).then(hydrateAll);
     },
     /* 写真を工事IDで取得（index 利用） */
     getPhotosByProject: function (projectId) {
       return tx('photos', 'readonly').then(function (os) {
         return reqToPromise(os.index('projectId').getAll(projectId));
-      });
+      }).then(hydrateAll);
     },
     /* アルバムを工事IDで取得（index 利用） */
     getAlbumsByProject: function (projectId) {
       return tx('albums', 'readonly').then(function (os) {
         return reqToPromise(os.index('projectId').getAll(projectId));
-      });
+      }).then(hydrateAll);
     },
     /* 設定 */
     getSetting: function (key, fallback) {

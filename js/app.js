@@ -21,6 +21,8 @@
     var btn = document.getElementById('btnHeaderToggle');
     if (!a) return;
     if (collapsed) a.classList.add('collapsed'); else a.classList.remove('collapsed');
+    // 下のツールバー（＋写真を取り込む/検索/選択バー等）も連動して収納
+    document.documentElement.classList.toggle('ui-collapsed', collapsed);
     if (btn) {
       btn.textContent = collapsed ? '▽' : '△';        // 畳=▽(開く) / 展開=△(閉じる)
       btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
