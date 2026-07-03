@@ -33,11 +33,25 @@
     if (!e) return '不明なエラー';
     if (e.message === 'NO_TOKEN') return 'トークンが未設定です。「① GitHub設定」から登録してください。';
     var m = e.message || String(e);
-    if (e.status === 401) return '認証エラー（トークンが無効か期限切れ）: ' + m;
+    // Fine-grained トークンは対象リポジトリ／Contents権限の不足でも 401 になり得る
+    if (e.status === 401) return '認証エラー（トークンが無効／期限切れ、または対象リポジトリ・Contents権限の不足）: ' + m;
     if (e.status === 403) return '権限エラー（トークンの権限不足、またはレート制限）: ' + m;
     if (e.status === 404) return '見つかりません（リポジトリ名やトークンの対象範囲をご確認ください）: ' + m;
     if (e.status === 409 || e.status === 422) return '競合／不正なリクエスト: ' + m;
     return m;
+  }
+
+  /* 指定リポジトリに書き込み可能か検証（読取＋permissions.push）。
+     戻り値: Promise<{ok:bool, reason:string}> */
+  function checkRepoWritable(repo) {
+    return ghFetch('/repos/' + OWNER + '/' + repo).then(function (r) {
+      if (r && r.permissions && r.permissions.push === true) return { ok: true, reason: '' };
+      return { ok: false, reason: repo + '：読み取りはできますが書き込み権限がありません（Contents を Read and write に）。' };
+    }).catch(function (e) {
+      if (e.status === 404) return { ok: false, reason: repo + '：トークンの対象リポジトリに含まれていません（Repository access に追加してください）。' };
+      if (e.status === 401 || e.status === 403) return { ok: false, reason: repo + '：アクセスできません（対象リポジトリと Contents=Read and write を確認）。' };
+      return { ok: false, reason: repo + '：確認中にエラー（' + (e.message || e) + '）' };
+    });
   }
 
   function blobToBase64(blob) {
@@ -133,17 +147,38 @@
         { name: 'token', label: 'トークン(PAT)', type: 'password', value: cur || '', placeholder: 'github_pat_... または ghp_...' }
       ]).then(function (v) {
         if (!v) return;
-        var t = (v.token || '').trim();
+        // 改行込みで貼り付けても壊れないよう空白は全除去
+        var t = (v.token || '').replace(/\s+/g, '');
         if (!t) { return UI.alert('トークンが空です。', 'GitHub設定'); }
         return Storage.setSetting('githubToken', t).then(function () {
-          var busy = UI.busy('接続を確認中…');
+          var busy = UI.busy('接続と権限を確認中…');
+          // ① アカウント認証 → ② 両リポジトリの書き込み権限まで検証する
           return ghFetch('/user').then(function (u) {
-            busy.close();
-            UI.alert('接続できました。\nログイン: ' + (u && u.login) + '\n\nこれで「バックアップ」「復元」「アプリを更新して公開」が使えます。', 'GitHub設定');
+            return checkRepoWritable(DATA_REPO).then(function (d) {
+              return checkRepoWritable(CODE_REPO).then(function (c) {
+                busy.close();
+                var login = u && u.login;
+                if (d.ok && c.ok) {
+                  UI.alert('接続できました。\nログイン: ' + login +
+                    '\n・' + DATA_REPO + '（バックアップ先）: 書き込みOK' +
+                    '\n・' + CODE_REPO + '（公開サイト）: 書き込みOK' +
+                    '\n\nこれで「バックアップ」「復元」「アプリを更新して公開」が使えます。', 'GitHub設定');
+                } else {
+                  var msg = 'ログインはできました（' + login + '）が、リポジトリへの書き込み権限が不足しています。\n\n';
+                  if (!d.ok) msg += '× ' + d.reason + '\n';
+                  if (!c.ok) msg += '× ' + c.reason + '\n';
+                  msg += '\n【直し方】トークン設定ページで\n' +
+                    '・Repository access に「' + CODE_REPO + '」と「' + DATA_REPO + '」の両方を追加\n' +
+                    '・Permissions → Contents を「Read and write」\n' +
+                    'に修正して更新後、もう一度貼り付けてください。';
+                  UI.alert(msg, 'GitHub設定');
+                }
+              });
+            });
           }).catch(function (e) {
             busy.close();
             UI.alert('接続できませんでした。\n' + fmtErr(e) +
-              '\n\nトークンと、対象リポジトリ（' + CODE_REPO + ' / ' + DATA_REPO + '）の Contents:読み書き 権限をご確認ください。', 'GitHub設定');
+              '\n\nトークンの値、対象リポジトリ（' + CODE_REPO + ' / ' + DATA_REPO + '）、Contents=Read and write をご確認ください。', 'GitHub設定');
           });
         });
       });
