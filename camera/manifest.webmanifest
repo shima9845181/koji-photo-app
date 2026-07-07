@@ -1,0 +1,16 @@
+{
+  "name": "電子黒板カメラ",
+  "short_name": "黒板カメラ",
+  "description": "工事写真に電子黒板を重ねて撮影し、位置情報と黒板情報を埋め込むアプリ（さかえ電気）",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0D7377",
+  "theme_color": "#0D7377",
+  "lang": "ja",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

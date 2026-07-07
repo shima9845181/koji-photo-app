@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#0D7377">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>電子黒板カメラ</title>
+<style>
+  :root{
+    --green:#0D7377; --green-d:#0a5a5e; --green-l:#12939a;
+    --bg:#f2f4f5; --card:#ffffff; --line:#d7dde0; --text:#1a2426; --muted:#6b7a80;
+    --danger:#c0392b; --ok:#1f9d55;
+    --tap:52px; --appbar:56px;
+    --safe-b:env(safe-area-inset-bottom,0px);
+    --safe-t:env(safe-area-inset-top,0px);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; height:100%;}
+  body{
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN","Yu Gothic",Meiryo,sans-serif;
+    background:var(--bg); color:var(--text); overflow:hidden;
+    font-size:16px; line-height:1.5;
+  }
+  #app{height:100%; display:flex; flex-direction:column;}
+  button{font-family:inherit; font-size:16px; cursor:pointer;}
+  input,select,textarea{font-family:inherit; font-size:16px;}
+
+  /* ---- App bar ---- */
+  .appbar{
+    height:calc(var(--appbar) + var(--safe-t)); padding-top:var(--safe-t);
+    background:var(--green); color:#fff; display:flex; align-items:center; gap:8px;
+    padding-left:8px; padding-right:12px; flex:0 0 auto; box-shadow:0 2px 4px rgba(0,0,0,.15);
+  }
+  .appbar .back{background:transparent; border:0; color:#fff; font-size:26px; width:44px; height:44px; line-height:1;}
+  .appbar h1{font-size:18px; margin:0; font-weight:700; flex:1; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .appbar .sub{font-size:13px; opacity:.85; font-weight:400;}
+
+  /* ---- Screen scroll body ---- */
+  .body{flex:1; overflow-y:auto; -webkit-overflow-scrolling:touch; padding:14px; padding-bottom:calc(24px + var(--safe-b));}
+  .screen{display:none; height:100%; flex-direction:column;}
+  .screen.active{display:flex;}
+
+  /* ---- Buttons ---- */
+  .btn{min-height:var(--tap); border-radius:12px; border:1px solid var(--line); background:#fff; color:var(--text);
+       padding:0 16px; font-weight:600; display:inline-flex; align-items:center; justify-content:center; gap:8px;}
+  .btn:active{transform:translateY(1px);}
+  .btn.primary{background:var(--green); border-color:var(--green); color:#fff;}
+  .btn.danger{background:#fff; border-color:var(--danger); color:var(--danger);}
+  .btn.block{display:flex; width:100%;}
+  .btn.lg{min-height:60px; font-size:18px;}
+  .btn:disabled{opacity:.45;}
+  .btn-row{display:flex; gap:10px; flex-wrap:wrap;}
+
+  /* ---- Home ---- */
+  .home-menu{display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-top:14px;}
+  .home-menu .btn{min-height:72px; font-size:17px; flex-direction:column; gap:4px;}
+  .home-menu .ico{font-size:26px;}
+  .sec-title{font-size:14px; color:var(--muted); font-weight:700; margin:6px 2px;}
+  .card{background:var(--card); border:1px solid var(--line); border-radius:14px; padding:14px; margin-bottom:10px;}
+  .proj-card{display:flex; align-items:center; gap:12px; min-height:64px;}
+  .proj-card.selected{border-color:var(--green); box-shadow:0 0 0 2px rgba(13,115,119,.25);}
+  .proj-card .nm{font-weight:700; font-size:17px;}
+  .proj-card .mt{font-size:13px; color:var(--muted);}
+  .proj-card .go{margin-left:auto; font-size:22px; color:var(--green);}
+  .empty{color:var(--muted); text-align:center; padding:30px 10px;}
+
+  .field{margin-bottom:12px;}
+  .field label{display:block; font-size:13px; color:var(--muted); font-weight:700; margin-bottom:4px;}
+  .field input[type=text], .field textarea, .field select{
+    width:100%; min-height:var(--tap); border:1px solid var(--line); border-radius:10px; padding:10px 12px; background:#fff;}
+  .field textarea{min-height:90px; resize:vertical;}
+  .hint{font-size:12px; color:var(--muted); margin-top:3px;}
+
+  /* ---- Capture screen ---- */
+  #screen-capture{background:#000;}
+  .cam-wrap{position:relative; flex:1; overflow:hidden; background:#000;}
+  #video{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; background:#000;}
+  #boardOverlay{position:absolute; pointer-events:auto;}
+  #boardOverlay canvas{display:block; width:100%; height:auto; box-shadow:0 1px 6px rgba(0,0,0,.4);}
+  .cam-top{position:absolute; top:calc(8px + var(--safe-t)); left:8px; right:8px; display:flex; align-items:center; gap:8px; z-index:5;}
+  .cam-top .pill{background:rgba(0,0,0,.5); color:#fff; border-radius:20px; padding:6px 12px; font-size:13px; display:flex; align-items:center; gap:6px;}
+  .cam-top .iconbtn{background:rgba(0,0,0,.5); color:#fff; border:0; width:44px; height:44px; border-radius:50%; font-size:20px;}
+  .gps-dot{width:10px; height:10px; border-radius:50%; background:#f1c40f;}
+  .gps-ok .gps-dot{background:#2ecc71;} .gps-bad .gps-dot{background:#e74c3c;}
+  .cam-bottom{position:absolute; left:0; right:0; bottom:0; padding:14px 16px calc(14px + var(--safe-b));
+    display:flex; align-items:center; justify-content:space-between; gap:12px; z-index:6;
+    background:linear-gradient(to top, rgba(0,0,0,.55), rgba(0,0,0,0));}
+  .shutter{width:78px; height:78px; border-radius:50%; background:#fff; border:5px solid rgba(255,255,255,.5); flex:0 0 auto;}
+  .shutter:active{transform:scale(.94);}
+  .shutter:disabled{opacity:.5;}
+  .thumb-last{width:56px; height:56px; border-radius:10px; object-fit:cover; border:2px solid #fff; background:#333;}
+  .cam-side{display:flex; flex-direction:column; gap:8px; align-items:center;}
+  .cam-sidebtn{background:rgba(0,0,0,.5); color:#fff; border:0; border-radius:12px; min-width:56px; min-height:44px; font-size:13px; padding:4px 8px;}
+  .cam-sidebtn.active{background:var(--green);}
+
+  /* ---- Photo list ---- */
+  .day-group{margin-bottom:16px;}
+  .day-head{font-weight:700; font-size:14px; color:var(--muted); margin:4px 2px 8px;}
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); gap:6px;}
+  .pcell{position:relative; aspect-ratio:1; border-radius:8px; overflow:hidden; background:#ddd; border:1px solid var(--line);}
+  .pcell img{width:100%; height:100%; object-fit:cover; display:block;}
+  .pcell .sel{position:absolute; top:4px; left:4px; width:24px; height:24px; border-radius:50%; background:rgba(0,0,0,.4); border:2px solid #fff;}
+  .pcell.on .sel{background:var(--green);}
+  .selbar{position:sticky; top:0; z-index:3; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px; display:flex; gap:8px; align-items:center; margin-bottom:10px;}
+
+  /* ---- Dialog / toast ---- */
+  .modal-bg{position:fixed; inset:0; background:rgba(0,0,0,.5); display:flex; align-items:flex-end; justify-content:center; z-index:100; padding:0;}
+  .modal{background:#fff; border-radius:18px 18px 0 0; width:100%; max-width:640px; max-height:92vh; overflow-y:auto;
+    padding:18px 16px calc(20px + var(--safe-b)); box-shadow:0 -4px 20px rgba(0,0,0,.2);}
+  @media(min-width:641px){ .modal-bg{align-items:center;} .modal{border-radius:18px; max-height:88vh;} }
+  .modal h2{margin:2px 0 14px; font-size:19px;}
+  .modal .close{position:absolute;}
+  .dlg-actions{display:flex; gap:10px; margin-top:16px;}
+  .dlg-actions .btn{flex:1;}
+  #toast{position:fixed; left:50%; bottom:calc(90px + var(--safe-b)); transform:translateX(-50%); background:rgba(20,30,32,.94); color:#fff;
+    padding:12px 18px; border-radius:24px; z-index:200; font-size:15px; max-width:90vw; text-align:center; opacity:0; transition:opacity .2s; pointer-events:none;}
+  #toast.show{opacity:1;}
+  .badge{display:inline-block; background:var(--green-l); color:#fff; font-size:11px; border-radius:10px; padding:1px 7px; margin-left:6px;}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="appbar">
+    <button class="back" id="btnBack" style="display:none">‹</button>
+    <h1 id="barTitle">電子黒板カメラ</h1>
+    <span class="sub" id="barSub"></span>
+  </div>
+
+  <!-- HOME -->
+  <section class="screen active" id="screen-home">
+    <div class="body">
+      <div class="sec-title">工事を選択</div>
+      <div id="projList"></div>
+      <div class="home-menu">
+        <button class="btn primary lg" id="mStart"><span class="ico">📷</span>撮影開始</button>
+        <button class="btn lg" id="mProjects"><span class="ico">🗂️</span>工事リスト</button>
+        <button class="btn lg" id="mPhotos"><span class="ico">🖼️</span>写真一覧</button>
+        <button class="btn lg" id="mSettings"><span class="ico">⚙️</span>設定</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- PROJECTS -->
+  <section class="screen" id="screen-projects">
+    <div class="body">
+      <button class="btn primary block" id="btnAddProj">＋ 工事を追加</button>
+      <div style="height:12px"></div>
+      <div id="projEditList"></div>
+    </div>
+  </section>
+
+  <!-- CAPTURE -->
+  <section class="screen" id="screen-capture">
+    <div class="cam-wrap" id="camWrap">
+      <video id="video" playsinline muted autoplay></video>
+      <div id="boardOverlay"></div>
+      <div class="cam-top">
+        <span class="pill" id="gpsPill"><span class="gps-dot"></span><span id="gpsTxt">GPS…</span></span>
+        <span style="flex:1"></span>
+        <button class="iconbtn" id="btnEditBoard" title="黒板編集">✎</button>
+      </div>
+      <div class="cam-bottom">
+        <img class="thumb-last" id="lastThumb" alt="" style="visibility:hidden">
+        <button class="shutter" id="btnShutter" aria-label="撮影"></button>
+        <div class="cam-side">
+          <button class="cam-sidebtn" id="btnCorner">位置<br><b id="cornerLbl">右下</b></button>
+          <button class="cam-sidebtn" id="btnSize">大きさ<br><b id="sizeLbl">中</b></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- PHOTOS -->
+  <section class="screen" id="screen-photos">
+    <div class="body" id="photosBody"></div>
+  </section>
+
+  <!-- SETTINGS -->
+  <section class="screen" id="screen-settings">
+    <div class="body" id="settingsBody"></div>
+  </section>
+</div>
+
+<div id="toast"></div>
+<canvas id="workCanvas" style="display:none"></canvas>
+
+<script src="piexif.min.js"></script>
+<script>
+"use strict";
+(function(){
+/* =========================================================================
+   電子黒板カメラ  Phase 1  (Vanilla JS, single-page)
+   さかえ電気 / 2026-07-07
+   ========================================================================= */
+
+const APP_ID = 'sakae-denki denshi-kokuban';
+const APP_VER = '1.0';
+const DCP_NS  = 'http://www.dcpadv.org/schema/3.0/';   // 写真管理アプリ readBlackboard と同一スキーマ
+const SAKAE_NS= 'http://sakae-denki.net/xmp/blackboard/1.0/';
+
+const SIZE_RATIO = { L:0.40, M:0.30, S:0.22 };
+const SIZE_LABEL = { L:'大', M:'中', S:'小' };
+const CORNER_LABEL = { tl:'左上', tr:'右上', bl:'左下', br:'右下' };
+const CORNER_ORDER = ['br','bl','tr','tl'];
+
+// 黒板ラベル既定（設定で変更可）
+const DEFAULT_LABELS = {
+  constructionName:'工事名', koushu:'工種', spot:'撮影箇所',
+  caption:'内容', date:'撮影日', jyuchusha:'受注者'
+};
+
+/* ---------------- IndexedDB ---------------- */
+const DB = (function(){
+  const NAME='denshi-kokuban', VER=1;
+  let _db=null;
+  function open(){
+    return new Promise((res,rej)=>{
+      if(_db) return res(_db);
+      const r=indexedDB.open(NAME,VER);
+      r.onupgradeneeded=e=>{
+        const db=e.target.result;
+        if(!db.objectStoreNames.contains('constructions')) db.createObjectStore('constructions',{keyPath:'id'});
+        if(!db.objectStoreNames.contains('photos')){
+          const s=db.createObjectStore('photos',{keyPath:'id'});
+          s.createIndex('constructionId','constructionId',{unique:false});
+        }
+        if(!db.objectStoreNames.contains('settings')) db.createObjectStore('settings',{keyPath:'key'});
+      };
+      r.onsuccess=e=>{_db=e.target.result; res(_db);};
+      r.onerror=e=>rej(e.target.error);
+    });
+  }
+  function tx(store,mode){ return open().then(db=>db.transaction(store,mode).objectStore(store)); }
+  function reqP(req){ return new Promise((res,rej)=>{req.onsuccess=()=>res(req.result); req.onerror=()=>rej(req.error);}); }
+  return {
+    getAll:s=>tx(s,'readonly').then(o=>reqP(o.getAll())),
+    get:(s,k)=>tx(s,'readonly').then(o=>reqP(o.get(k))),
+    put:(s,v)=>tx(s,'readwrite').then(o=>reqP(o.put(v))),
+    del:(s,k)=>tx(s,'readwrite').then(o=>reqP(o.delete(k))),
+    byIndex:(s,idx,val)=>tx(s,'readonly').then(o=>reqP(o.index(idx).getAll(val)))
+  };
+})();
+
+/* ---------------- Utilities ---------------- */
+function uuid(){
+  if(crypto.randomUUID) return crypto.randomUUID();
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,c=>{
+    const r=crypto.getRandomValues(new Uint8Array(1))[0]%16, v=c==='x'?r:(r&0x3|0x8); return v.toString(16);});
+}
+function pad(n,l){ n=String(n); while(n.length<l) n='0'+n; return n; }
+function two(n){ return pad(n,2); }
+function dtParts(d){ return {y:d.getFullYear(),mo:d.getMonth()+1,da:d.getDate(),h:d.getHours(),mi:d.getMinutes(),s:d.getSeconds()}; }
+function exifDateTime(d){ const p=dtParts(d); return `${p.y}:${two(p.mo)}:${two(p.da)} ${two(p.h)}:${two(p.mi)}:${two(p.s)}`; }
+function exifDate(d){ const p=dtParts(d); return `${p.y}:${two(p.mo)}:${two(p.da)}`; }
+function ymd(d){ const p=dtParts(d); return `${p.y}${two(p.mo)}${two(p.da)}`; }
+function hm(d){ const p=dtParts(d); return `${two(p.h)}${two(p.mi)}`; }
+function wareki(d){
+  // 令和：2019-05-01〜
+  const p=dtParts(d);
+  let era='令和', ey=p.y-2018;
+  if(p.y<2019 || (p.y===2019 && p.mo<5)){ era='平成'; ey=p.y-1988; }
+  return `${era}${ey===1?'元':ey}年${p.mo}月${p.da}日`;
+}
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c])); }
+function safeName(s){ return String(s||'').replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,'').slice(0,40) || '工事'; }
+
+let _toastTimer=null;
+function toast(msg,ms){ const t=document.getElementById('toast'); t.textContent=msg; t.classList.add('show');
+  clearTimeout(_toastTimer); _toastTimer=setTimeout(()=>t.classList.remove('show'), ms||2200); }
+
+/* ---------------- Dialog helpers ---------------- */
+function dialog(html, opts){
+  opts=opts||{};
+  return new Promise(resolve=>{
+    const bg=document.createElement('div'); bg.className='modal-bg';
+    const m=document.createElement('div'); m.className='modal'; m.innerHTML=html; bg.appendChild(m);
+    document.body.appendChild(bg);
+    function done(v){ bg.remove(); resolve(v); }
+    bg.addEventListener('click',e=>{ if(e.target===bg && opts.dismissable!==false) done(null); });
+    m.querySelectorAll('[data-close]').forEach(b=>b.addEventListener('click',()=>done(b.getAttribute('data-close'))));
+    if(opts.onMount) opts.onMount(m, done);
+  });
+}
+function confirmDlg(msg, okLabel, danger){
+  return dialog(`<h2>確認</h2><p style="margin:0 0 4px">${esc(msg)}</p>
+    <div class="dlg-actions"><button class="btn" data-close="cancel">キャンセル</button>
+    <button class="btn ${danger?'danger':'primary'}" data-close="ok">${esc(okLabel||'OK')}</button></div>`);
+}
+function alertDlg(msg,title){
+  return dialog(`<h2>${esc(title||'お知らせ')}</h2><p style="margin:0 0 4px">${esc(msg)}</p>
+    <div class="dlg-actions"><button class="btn primary" data-close="ok">OK</button></div>`);
+}
+
+/* ---------------- App state ---------------- */
+const State = {
+  projects:[], settings:null, currentProjId:null,
+  corner:'br', size:'M', gps:null, gpsStatus:'wait',
+  lastThumbUrl:null, capturing:false
+};
+function labels(){ return Object.assign({}, DEFAULT_LABELS, (State.settings&&State.settings.labels)||{}); }
+function currentProj(){ return State.projects.find(p=>p.id===State.currentProjId)||null; }
+
+async function loadState(){
+  State.projects = await DB.getAll('constructions');
+  State.settings = await DB.get('settings','app') || {key:'app', labels:{}, defaultJyuchusha:'さかえ電気', quality:0.92};
+  if(!State.currentProjId && State.projects.length) State.currentProjId=State.projects[0].id;
+}
+function saveSettings(){ return DB.put('settings', State.settings); }
+function saveProj(p){ return DB.put('constructions', p); }
+
+/* =========================================================================
+   黒板レンダラ  ── プレビューと保存で同一の描画関数を使う
+   renderBoardCanvas(data, preset, W) → canvas(W幅, 高さ自動)
+   ========================================================================= */
+function boardRows(data, preset){
+  const L=labels();
+  const koushuLine=[data.koushu,data.shubetsu,data.saibetsu].filter(Boolean).join('　');
+  const contentLine=[data.caption].filter(Boolean).join(' ');
+  if(preset==='simple'){
+    return { header:'', rows:[
+      {label:L.constructionName, value:data.constructionName},
+      {label:L.spot, value:data.spot},
+      {label:L.date, value:wareki(new Date(data.takenAt||Date.now()))}
+    ]};
+  }
+  return { header:(data.kubun||''), rows:[
+    {label:L.constructionName, value:data.constructionName},
+    {label:L.koushu, value:koushuLine},
+    {label:L.spot, value:data.spot},
+    {label:L.caption, value:contentLine},
+    {label:L.date, value:wareki(new Date(data.takenAt||Date.now()))},
+    {label:L.jyuchusha, value:data.jyuchusha}
+  ]};
+}
+function wrapText(ctx, text, maxW, maxLines){
+  text=String(text==null?'':text);
+  if(!text) return [''];
+  const lines=[]; let cur='';
+  for(const ch of text){
+    const t=cur+ch;
+    if(ctx.measureText(t).width>maxW && cur){ lines.push(cur); cur=ch; if(lines.length===maxLines-1) break; }
+    else cur=t;
+  }
+  // 残り
+  let rest = text.slice(lines.join('').length);
+  if(lines.length<maxLines){ lines.push(rest); }
+  else if(rest){ // 収まらない分は末尾を…に
+    let last=lines[maxLines-1]||'';
+    while(ctx.measureText(last+'…').width>maxW && last) last=last.slice(0,-1);
+    lines[maxLines-1]=last+'…';
+  }
+  return lines.slice(0,maxLines);
+}
+function renderBoardCanvas(data, preset, W){
+  W=Math.max(180, Math.round(W));
+  const pad=Math.round(W*0.028);
+  const labelW=Math.round(W*0.26);
+  const valX=pad+labelW+pad*0.6;
+  const valMaxW=W - valX - pad;
+  const fs=Math.max(11, Math.round(W*0.046));
+  const headFs=Math.round(fs*1.5);
+  const lineH=Math.round(fs*1.34);
+
+  const meas=document.createElement('canvas').getContext('2d');
+  meas.font=`bold ${fs}px sans-serif`;
+  const {header,rows}=boardRows(data,preset);
+
+  // 各行の高さを計測
+  const rowInfo=rows.map(r=>{
+    const lines=wrapText(meas, r.value||'', valMaxW, 2);
+    return {label:r.label, lines, h:Math.max(lineH+pad*0.7, lines.length*lineH+pad*0.5)};
+  });
+  const headerH = header ? Math.round(headFs*1.5) : 0;
+  let H = pad + headerH + rowInfo.reduce((a,r)=>a+r.h,0) + pad;
+
+  const cv=document.createElement('canvas'); cv.width=W; cv.height=H;
+  const ctx=cv.getContext('2d');
+  // 背景（緑）
+  ctx.fillStyle='#0D7377'; ctx.fillRect(0,0,W,H);
+  // 外枠
+  const bw=Math.max(2,Math.round(W*0.012));
+  ctx.strokeStyle='#ffffff'; ctx.lineWidth=bw;
+  ctx.strokeRect(bw/2,bw/2,W-bw,H-bw);
+  ctx.fillStyle='#ffffff'; ctx.textBaseline='middle';
+
+  let y=pad;
+  if(header){
+    ctx.font=`bold ${headFs}px sans-serif`; ctx.textAlign='center';
+    ctx.fillText(header, W/2, y+headerH/2);
+    y+=headerH;
+    ctx.beginPath(); ctx.moveTo(pad*0.6,y); ctx.lineTo(W-pad*0.6,y); ctx.lineWidth=Math.max(1,bw*0.6); ctx.strokeStyle='#fff'; ctx.stroke();
+  }
+  ctx.font=`bold ${fs}px sans-serif`;
+  const lineW=Math.max(1,Math.round(bw*0.6));
+  rowInfo.forEach(r=>{
+    const ry=y, rh=r.h;
+    // ラベル
+    ctx.textAlign='left';
+    ctx.fillText(r.label, pad, ry+rh/2);
+    // 縦罫線
+    ctx.strokeStyle='#fff'; ctx.lineWidth=lineW;
+    ctx.beginPath(); ctx.moveTo(pad+labelW, ry); ctx.lineTo(pad+labelW, ry+rh); ctx.stroke();
+    // 値（複数行）
+    const total=r.lines.length*lineH;
+    let ly=ry + rh/2 - total/2 + lineH/2;
+    r.lines.forEach(ln=>{ ctx.fillText(ln, valX, ly); ly+=lineH; });
+    y+=rh;
+    // 横罫線
+    ctx.beginPath(); ctx.moveTo(pad*0.6,y); ctx.lineTo(W-pad*0.6,y); ctx.stroke();
+  });
+  return cv;
+}
+function cornerPos(corner, frameW, frameH, bw, bh, margin){
+  const x = corner[1]==='l' ? margin : frameW-bw-margin;
+  const y = corner[0]==='t' ? margin : frameH-bh-margin;
+  return {x:Math.round(x), y:Math.round(y)};
+}
+
+/* =========================================================================
+   EXIF / XMP 埋め込み
+   ========================================================================= */
+function blobToDataURL(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=rej; r.readAsDataURL(blob); }); }
+function dataURLToBytes(u){ const bin=atob(u.split(',')[1]); const a=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return a; }
+function buildExifStr(meta){
+  const zeroth={}, exif={}, gps={};
+  const d=new Date(meta.takenAt);
+  zeroth[piexif.ImageIFD.DateTime]=exifDateTime(d);
+  zeroth[piexif.ImageIFD.Orientation]=1;
+  zeroth[piexif.ImageIFD.Make]='sakae-denki';
+  zeroth[piexif.ImageIFD.Software]=APP_ID+' '+APP_VER;
+  exif[piexif.ExifIFD.DateTimeOriginal]=exifDateTime(d);
+  exif[piexif.ExifIFD.DateTimeDigitized]=exifDateTime(d);
+  if(meta.lat!=null && meta.lng!=null){
+    gps[piexif.GPSIFD.GPSLatitudeRef]= meta.lat>=0?'N':'S';
+    gps[piexif.GPSIFD.GPSLatitude]=piexif.GPSHelper.degToDmsRational(Math.abs(meta.lat));
+    gps[piexif.GPSIFD.GPSLongitudeRef]= meta.lng>=0?'E':'W';
+    gps[piexif.GPSIFD.GPSLongitude]=piexif.GPSHelper.degToDmsRational(Math.abs(meta.lng));
+    gps[piexif.GPSIFD.GPSDateStamp]=exifDate(d);
+    if(meta.accuracy!=null){ const a=Math.max(0,Math.round(meta.accuracy*100)); gps[piexif.GPSIFD.GPSHPositioningError]=[a,100]; }
+  }
+  return piexif.dump({'0th':zeroth,'Exif':exif,'GPS':gps});
+}
+function buildXmp(meta){
+  const b=meta.bb||{};
+  const parts=[];
+  const dcp=(t,v)=>{ if(v!=null && v!=='') parts.push(`   <photo:${t}>${esc(v)}</photo:${t}>`); };
+  const sk =(t,v)=>{ if(v!=null && v!=='') parts.push(`   <sakae:${t}>${esc(v)}</sakae:${t}>`); };
+  dcp('ConstructionName', b.constructionName);
+  dcp('ConstructionType', b.koushu);
+  dcp('MiddleClassification', b.shubetsu);
+  dcp('SmallClassification', b.saibetsu);
+  dcp('PhotoClassification', b.kubun);
+  dcp('Title', b.caption);
+  dcp('Measurements', b.spot);
+  sk('PairId', meta.pairId);
+  sk('Kind', meta.kind);
+  sk('App', '電子黒板カメラ v'+APP_VER);
+  sk('Jyuchusha', b.jyuchusha);
+  if(meta.accuracy!=null) sk('GpsAccuracy', Math.round(meta.accuracy)+'m');
+  const body=parts.join('\n');
+  return '<?xpacket begin="﻿" id="W5M0MpCehiHzreSzNTczkc9d"?>\n'+
+    '<x:xmpmeta xmlns:x="adobe:ns:meta/">\n'+
+    ' <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#">\n'+
+    `  <rdf:Description rdf:about="" xmlns:photo="${DCP_NS}" xmlns:sakae="${SAKAE_NS}">\n`+
+    body+'\n'+
+    '  </rdf:Description>\n </rdf:RDF>\n</x:xmpmeta>\n<?xpacket end="w"?>';
+}
+// XMP を APP1 セグメントとして SOI 直後に UTF-8 バイトで挿入
+function insertXmpBytes(jpg, xmp){
+  const enc=new TextEncoder();
+  const header=enc.encode('http://ns.adobe.com/xap/1.0/\0');
+  const body=enc.encode(xmp);
+  const payloadLen=header.length+body.length;
+  const segLen=payloadLen+2; // 長さフィールド2バイトを含む
+  if(segLen>65535) return jpg; // 65KB超は Phase1 では無挿入（黒板テキストが達することは無い）
+  const seg=new Uint8Array(4+payloadLen);
+  seg[0]=0xFF; seg[1]=0xE1; seg[2]=(segLen>>8)&0xff; seg[3]=segLen&0xff;
+  seg.set(header,4); seg.set(body,4+header.length);
+  const out=new Uint8Array(jpg.length+seg.length);
+  out.set(jpg.subarray(0,2),0);        // SOI(FFD8)
+  out.set(seg,2);                       // XMP APP1
+  out.set(jpg.subarray(2),2+seg.length);
+  return out;
+}
+async function embedMeta(jpegBlob, meta){
+  const dataURL=await blobToDataURL(jpegBlob);
+  let withExif;
+  try{ withExif=piexif.insert(buildExifStr(meta), dataURL); }
+  catch(e){ console.warn('EXIF挿入失敗',e); withExif=dataURL; }
+  let jpg=dataURLToBytes(withExif);
+  try{ jpg=insertXmpBytes(jpg, buildXmp(meta)); }catch(e){ console.warn('XMP挿入失敗',e); }
+  return new Blob([jpg],{type:'image/jpeg'});
+}
+
+/* =========================================================================
+   カメラ / GPS
+   ========================================================================= */
+const Cam = {
+  stream:null, video:document.getElementById('video'),
+  async start(){
+    if(this.stream) return;
+    try{
+      this.stream=await navigator.mediaDevices.getUserMedia({
+        video:{ facingMode:{ideal:'environment'}, width:{ideal:4096}, height:{ideal:3072} },
+        audio:false
+      });
+    }catch(e){
+      await alertDlg('カメラを起動できませんでした。ブラウザのカメラ許可と、httpsでの表示をご確認ください。\n\n'+(e&&e.message||e),'カメラエラー');
+      throw e;
+    }
+    this.video.srcObject=this.stream;
+    await this.video.play().catch(()=>{});
+  },
+  stop(){ if(this.stream){ this.stream.getTracks().forEach(t=>t.stop()); this.stream=null; this.video.srcObject=null; } },
+  grab(){
+    const v=this.video, w=v.videoWidth, h=v.videoHeight;
+    const cv=document.getElementById('workCanvas'); cv.width=w; cv.height=h;
+    cv.getContext('2d').drawImage(v,0,0,w,h);
+    return {canvas:cv, w, h};
+  }
+};
+const Gps = {
+  watchId:null,
+  start(){
+    if(!navigator.geolocation){ State.gpsStatus='bad'; updateGpsPill(); return; }
+    State.gpsStatus='wait'; updateGpsPill();
+    this.watchId=navigator.geolocation.watchPosition(
+      pos=>{ State.gps={lat:pos.coords.latitude,lng:pos.coords.longitude,accuracy:pos.coords.accuracy,time:pos.timestamp};
+        State.gpsStatus='ok'; updateGpsPill(); },
+      err=>{ if(!State.gps) State.gpsStatus='bad'; updateGpsPill(); },
+      {enableHighAccuracy:true, maximumAge:5000, timeout:15000}
+    );
+  },
+  stop(){ if(this.watchId!=null){ navigator.geolocation.clearWatch(this.watchId); this.watchId=null; } }
+};
+function updateGpsPill(){
+  const pill=document.getElementById('gpsPill'), txt=document.getElementById('gpsTxt');
+  pill.classList.remove('gps-ok','gps-bad');
+  if(State.gpsStatus==='ok'){ pill.classList.add('gps-ok'); txt.textContent='GPS '+Math.round(State.gps.accuracy)+'m'; }
+  else if(State.gpsStatus==='bad'){ pill.classList.add('gps-bad'); txt.textContent='GPSなし'; }
+  else txt.textContent='GPS取得中…';
+}
+
+/* =========================================================================
+   撮影処理
+   ========================================================================= */
+function boardData(){
+  const p=currentProj()||{};
+  const bb=p.bb||{};
+  return {
+    constructionName:p.name||'', koushu:bb.koushu||'', shubetsu:bb.shubetsu||'', saibetsu:bb.saibetsu||'',
+    kubun:bb.kubun||'', spot:bb.spot||'', caption:bb.caption||'',
+    jyuchusha:(p.jyuchusha|| (State.settings&&State.settings.defaultJyuchusha) ||'さかえ電気'),
+    takenAt:Date.now()
+  };
+}
+async function nextSeq(projId, dateKey){
+  const list=await DB.byIndex('photos','constructionId',projId);
+  let max=0; list.forEach(ph=>{ if(ph.dateKey===dateKey && ph.kind==='composite' && ph.seq>max) max=ph.seq; });
+  return max+1;
+}
+async function shutter(){
+  if(State.capturing) return;
+  const proj=currentProj();
+  if(!proj){ await alertDlg('先に工事を選択してください。'); return; }
+  if(!Cam.stream){ return; }
+  State.capturing=true;
+  const btn=document.getElementById('btnShutter'); btn.disabled=true;
+  try{
+    const {canvas:full, w, h}=Cam.grab();
+    if(w*h < 1000000){
+      const go=await confirmDlg(`この端末のカメラ解像度は約${(w*h/10000|0)/100}万画素で、推奨(100万画素)未満です。このまま撮影しますか？`,'撮影する');
+      if(go!=='ok'){ return; }
+    }
+    if(State.gpsStatus!=='ok'){
+      const go=await confirmDlg('GPS位置情報がまだ取得できていません。位置情報なしで撮影しますか？（後から位置は付けられません）','撮影する');
+      if(go!=='ok'){ return; }
+    }
+    const data=boardData();
+    const dateKey=ymd(new Date(data.takenAt));
+    const seq=await nextSeq(proj.id, dateKey);
+    const pairId=uuid();
+    const quality=(State.settings&&State.settings.quality)||0.92;
+    const g=State.gps||{};
+    const baseMeta={ takenAt:data.takenAt, lat:g.lat!=null?g.lat:null, lng:g.lng!=null?g.lng:null,
+      accuracy:g.accuracy!=null?g.accuracy:null, pairId, bb:data };
+    const fnameKoushu=safeName(data.koushu||'写真');
+    const baseName=`${dateKey}_${hm(new Date(data.takenAt))}_${fnameKoushu}_${pad(seq,3)}`;
+
+    // 元写真
+    const orgBlob=await new Promise(r=>full.toBlob(r,'image/jpeg',quality));
+    const orgFinal=await embedMeta(orgBlob, Object.assign({},baseMeta,{kind:'org'}));
+    // 合成版
+    const comp=document.createElement('canvas'); comp.width=w; comp.height=h;
+    const cctx=comp.getContext('2d'); cctx.drawImage(full,0,0);
+    const board=renderBoardCanvas(data, proj.preset||'standard', Math.round(w*(SIZE_RATIO[State.size]||0.30)));
+    const margin=Math.round(w*0.03);
+    const pos=cornerPos(State.corner, w, h, board.width, board.height, margin);
+    cctx.drawImage(board, pos.x, pos.y);
+    const compBlob=await new Promise(r=>comp.toBlob(r,'image/jpeg',quality));
+    const compFinal=await embedMeta(compBlob, Object.assign({},baseMeta,{kind:'composite'}));
+
+    // サムネイル（合成版）
+    const thumb=await makeThumb(comp);
+
+    const now=Date.now();
+    const orgRec={ id:uuid(), pairId, constructionId:proj.id, kind:'org', filename:baseName+'_org.jpg',
+      blob:orgFinal, takenAt:data.takenAt, lat:baseMeta.lat, lng:baseMeta.lng, accuracy:baseMeta.accuracy,
+      seq, dateKey, bb:data, preset:proj.preset||'standard', createdAt:now };
+    const compRec={ id:uuid(), pairId, constructionId:proj.id, kind:'composite', filename:baseName+'.jpg',
+      blob:compFinal, thumb, takenAt:data.takenAt, lat:baseMeta.lat, lng:baseMeta.lng, accuracy:baseMeta.accuracy,
+      seq, dateKey, bb:data, preset:proj.preset||'standard', createdAt:now };
+    await DB.put('photos', orgRec);
+    await DB.put('photos', compRec);
+
+    // 直前サムネ更新
+    if(State.lastThumbUrl) URL.revokeObjectURL(State.lastThumbUrl);
+    State.lastThumbUrl=URL.createObjectURL(thumb);
+    const lt=document.getElementById('lastThumb'); lt.src=State.lastThumbUrl; lt.style.visibility='visible';
+    toast('保存しました（'+pad(seq,3)+'）');
+  }catch(e){
+    console.error(e); await alertDlg('撮影の保存に失敗しました。\n'+(e&&e.message||e),'エラー');
+  }finally{
+    State.capturing=false; document.getElementById('btnShutter').disabled=false;
+  }
+}
+async function makeThumb(srcCanvas){
+  const max=480, w=srcCanvas.width, h=srcCanvas.height, sc=Math.min(1,max/Math.max(w,h));
+  const cv=document.createElement('canvas'); cv.width=Math.round(w*sc); cv.height=Math.round(h*sc);
+  cv.getContext('2d').drawImage(srcCanvas,0,0,cv.width,cv.height);
+  return new Promise(r=>cv.toBlob(r,'image/jpeg',0.8));
+}
+
+/* =========================================================================
+   撮影プレビュー黒板の更新
+   ========================================================================= */
+function updateBoardOverlay(){
+  const proj=currentProj(); if(!proj) return;
+  const wrap=document.getElementById('camWrap'), ov=document.getElementById('boardOverlay');
+  const cw=wrap.clientWidth, ch=wrap.clientHeight; if(!cw) return;
+  const ratio=SIZE_RATIO[State.size]||0.30;
+  const W=Math.round(cw*ratio);
+  const data=boardData();
+  const cv=renderBoardCanvas(data, proj.preset||'standard', W);
+  ov.innerHTML=''; ov.appendChild(cv);
+  ov.style.width=W+'px';
+  const margin=Math.round(cw*0.03);
+  const bh=cv.height*(W/cv.width); // = cv.height (W===cv.width)
+  ov.style.left = State.corner[1]==='l' ? margin+'px' : (cw-W-margin)+'px';
+  ov.style.top  = State.corner[0]==='t' ? margin+'px' : (ch-cv.height-margin)+'px';
+  // ラベル更新
+  document.getElementById('cornerLbl').textContent=CORNER_LABEL[State.corner];
+  document.getElementById('sizeLbl').textContent=SIZE_LABEL[State.size];
+}
+
+/* =========================================================================
+   ルーティング
+   ========================================================================= */
+const SCREENS={home:'画面',projects:'工事リスト',capture:'撮影',photos:'写真一覧',settings:'設定'};
+let _screen='home';
+function go(name){
+  if(_screen==='capture' && name!=='capture'){ Cam.stop(); Gps.stop(); }
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('active'));
+  document.getElementById('screen-'+name).classList.add('active');
+  _screen=name;
+  const back=document.getElementById('btnBack');
+  back.style.display = name==='home' ? 'none':'inline-block';
+  const titles={home:'電子黒板カメラ',projects:'工事リスト',capture:'撮影',photos:'写真一覧',settings:'設定'};
+  document.getElementById('barTitle').textContent=titles[name];
+  const proj=currentProj();
+  document.getElementById('barSub').textContent = (name==='capture'||name==='photos') && proj ? proj.name : '';
+  if(name==='home') renderHome();
+  if(name==='projects') renderProjects();
+  if(name==='photos') renderPhotos();
+  if(name==='settings') renderSettings();
+  if(name==='capture') enterCapture();
+}
+async function enterCapture(){
+  const proj=currentProj();
+  if(!proj){ await alertDlg('先に工事を追加・選択してください。'); go('projects'); return; }
+  State.corner=proj.corner||'br'; State.size=proj.size||'M';
+  const lt=document.getElementById('lastThumb');
+  if(State.lastThumbUrl){ lt.src=State.lastThumbUrl; lt.style.visibility='visible'; } else lt.style.visibility='hidden';
+  Gps.start();
+  try{ await Cam.start(); }catch(e){ go('home'); return; }
+  // video 実サイズ確定後にオーバーレイ
+  const wait=()=>{ if(Cam.video.videoWidth){ updateBoardOverlay(); } else requestAnimationFrame(wait); };
+  wait();
+}
+
+/* =========================================================================
+   ホーム
+   ========================================================================= */
+function renderHome(){
+  const el=document.getElementById('projList');
+  if(!State.projects.length){
+    el.innerHTML=`<div class="empty">工事が未登録です。<br>「工事リスト」から追加してください。</div>`;
+    return;
+  }
+  el.innerHTML='';
+  State.projects.forEach(p=>{
+    const d=document.createElement('div');
+    d.className='card proj-card'+(p.id===State.currentProjId?' selected':'');
+    d.innerHTML=`<div><div class="nm">${esc(p.name)}</div>
+      <div class="mt">${esc(p.number?('工事番号 '+p.number):'')} ${esc((p.preset==='simple'?'シンプル型':'標準型'))}</div></div>
+      <div class="go">${p.id===State.currentProjId?'✔':'›'}</div>`;
+    d.addEventListener('click',()=>{ State.currentProjId=p.id; renderHome(); });
+    el.appendChild(d);
+  });
+}
+
+/* =========================================================================
+   工事リスト（登録・編集）
+   ========================================================================= */
+function renderProjects(){
+  const el=document.getElementById('projEditList');
+  if(!State.projects.length){ el.innerHTML=`<div class="empty">工事がまだありません。</div>`; return; }
+  el.innerHTML='';
+  State.projects.forEach(p=>{
+    const d=document.createElement('div'); d.className='card';
+    d.innerHTML=`<div style="display:flex;align-items:center;gap:10px">
+      <div style="flex:1"><div class="nm" style="font-weight:700;font-size:17px">${esc(p.name)}</div>
+      <div class="mt" style="font-size:13px;color:var(--muted)">${esc(p.number||'')}</div></div>
+      <button class="btn" data-edit="${p.id}">編集</button>
+      <button class="btn danger" data-del="${p.id}">削除</button></div>`;
+    d.querySelector('[data-edit]').addEventListener('click',()=>editProj(p.id));
+    d.querySelector('[data-del]').addEventListener('click',()=>delProj(p.id));
+    el.appendChild(d);
+  });
+}
+function projForm(p){
+  const v=k=>esc(p[k]||'');
+  const list=k=>esc((p[k]||[]).join('\n'));
+  return `
+  <div class="field"><label>工事名 *</label><input type="text" id="f_name" value="${v('name')}" placeholder="○○邸 新築電気工事"></div>
+  <div class="field"><label>工事番号</label><input type="text" id="f_number" value="${v('number')}"></div>
+  <div class="field"><label>受注者</label><input type="text" id="f_jyuchusha" value="${esc(p.jyuchusha||(State.settings&&State.settings.defaultJyuchusha)||'さかえ電気')}"></div>
+  <div class="field"><label>黒板プリセット</label>
+    <select id="f_preset">
+      <option value="standard"${p.preset!=='simple'?' selected':''}>標準型（工事名/工種/撮影箇所/内容/日付/受注者）</option>
+      <option value="simple"${p.preset==='simple'?' selected':''}>シンプル型（工事名/撮影箇所/日付）</option>
+    </select></div>
+  <div class="field"><label>工種リスト（改行区切り）</label><textarea id="f_koushuList" placeholder="配線工事&#10;配管工事">${list('koushuList')}</textarea></div>
+  <div class="field"><label>種別リスト</label><textarea id="f_shubetsuList">${list('shubetsuList')}</textarea></div>
+  <div class="field"><label>細別リスト</label><textarea id="f_saibetsuList">${list('saibetsuList')}</textarea></div>
+  <div class="field"><label>撮影区分リスト</label><textarea id="f_kubunList" placeholder="施工状況&#10;出来形&#10;使用材料">${list('kubunList')}</textarea></div>
+  <div class="field"><label>撮影箇所リスト</label><textarea id="f_spotList">${list('spotList')}</textarea></div>
+  <div class="field"><label>内容（定型文）リスト</label><textarea id="f_captionList">${list('captionList')}</textarea></div>`;
+}
+function readProjForm(m, p){
+  const g=id=>m.querySelector('#'+id).value.trim();
+  const gl=id=>m.querySelector('#'+id).value.split('\n').map(s=>s.trim()).filter(Boolean);
+  p.name=g('f_name'); p.number=g('f_number'); p.jyuchusha=g('f_jyuchusha'); p.preset=g('f_preset');
+  p.koushuList=gl('f_koushuList'); p.shubetsuList=gl('f_shubetsuList'); p.saibetsuList=gl('f_saibetsuList');
+  p.kubunList=gl('f_kubunList'); p.spotList=gl('f_spotList'); p.captionList=gl('f_captionList');
+  return p;
+}
+async function editProj(id){
+  const existing = id ? State.projects.find(p=>p.id===id) : null;
+  const p = existing ? JSON.parse(JSON.stringify(existing)) : { id:uuid(), corner:'br', size:'M', bb:{}, createdAt:Date.now() };
+  await dialog(`<h2>${existing?'工事を編集':'工事を追加'}</h2>${projForm(p)}
+    <div class="dlg-actions"><button class="btn" data-close="cancel">キャンセル</button>
+    <button class="btn primary" data-x="save">保存</button></div>`,
+    {onMount:(m,done)=>{
+      m.querySelector('[data-x=save]').addEventListener('click', async ()=>{
+        readProjForm(m,p);
+        if(!p.name){ toast('工事名を入力してください'); return; }
+        await saveProj(p);
+        await loadState(); State.currentProjId=p.id;
+        renderProjects(); done('save');
+        toast('保存しました');
+      });
+    }});
+}
+async function delProj(id){
+  const p=State.projects.find(x=>x.id===id); if(!p) return;
+  const photos=await DB.byIndex('photos','constructionId',id);
+  const go=await confirmDlg(`「${p.name}」を削除しますか？${photos.length?('\nこの工事の写真 '+photos.length+'枚も削除されます。'):''}`,'削除する',true);
+  if(go!=='ok') return;
+  for(const ph of photos) await DB.del('photos', ph.id);
+  await DB.del('constructions', id);
+  if(State.currentProjId===id) State.currentProjId=null;
+  await loadState(); renderProjects();
+  toast('削除しました');
+}
+
+/* =========================================================================
+   黒板編集パネル（撮影中）
+   ========================================================================= */
+function fieldWithList(id, label, value, list){
+  const dl='dl_'+id;
+  const opts=(list||[]).map(o=>`<option value="${esc(o)}">`).join('');
+  return `<div class="field"><label>${esc(label)}</label>
+    <input type="text" id="${id}" value="${esc(value||'')}" list="${dl}" autocomplete="off">
+    <datalist id="${dl}">${opts}</datalist></div>`;
+}
+async function openBoardEditor(){
+  const proj=currentProj(); if(!proj) return;
+  const bb=proj.bb||{};
+  const isSimple=proj.preset==='simple';
+  let html=`<h2>黒板の内容</h2>
+    <div class="field"><label>プリセット</label>
+     <select id="e_preset"><option value="standard"${!isSimple?' selected':''}>標準型</option>
+     <option value="simple"${isSimple?' selected':''}>シンプル型</option></select></div>`;
+  html+=fieldWithList('e_kubun','撮影区分（大分類：施工状況 等）',bb.kubun,proj.kubunList);
+  html+=fieldWithList('e_koushu','工種',bb.koushu,proj.koushuList);
+  html+=fieldWithList('e_shubetsu','種別',bb.shubetsu,proj.shubetsuList);
+  html+=fieldWithList('e_saibetsu','細別',bb.saibetsu,proj.saibetsuList);
+  html+=fieldWithList('e_spot','撮影箇所',bb.spot,proj.spotList);
+  html+=fieldWithList('e_caption','内容（施工状況の記述）',bb.caption,proj.captionList);
+  html+=`<div class="hint">選択肢から選ぶか、直接入力できます。新しい値は次回のために保存されます。</div>
+    <div class="dlg-actions"><button class="btn" data-close="cancel">キャンセル</button>
+    <button class="btn primary" data-x="ok">反映</button></div>`;
+  await dialog(html,{onMount:(m,done)=>{
+    m.querySelector('[data-x=ok]').addEventListener('click', async ()=>{
+      const g=id=>m.querySelector('#'+id).value.trim();
+      const nb={ kubun:g('e_kubun'), koushu:g('e_koushu'), shubetsu:g('e_shubetsu'),
+        saibetsu:g('e_saibetsu'), spot:g('e_spot'), caption:g('e_caption') };
+      proj.preset=m.querySelector('#e_preset').value;
+      proj.bb=nb;
+      // 新規値をリストに追加
+      const addTo=(k,v)=>{ if(v){ proj[k]=proj[k]||[]; if(!proj[k].includes(v)) proj[k].push(v); } };
+      addTo('kubunList',nb.kubun); addTo('koushuList',nb.koushu); addTo('shubetsuList',nb.shubetsu);
+      addTo('saibetsuList',nb.saibetsu); addTo('spotList',nb.spot); addTo('captionList',nb.caption);
+      await saveProj(proj); await loadState();
+      updateBoardOverlay();
+      done('ok');
+    });
+  }});
+}
+
+/* =========================================================================
+   写真一覧
+   ========================================================================= */
+const PhotosView={ sel:new Set(), urls:[] };
+async function renderPhotos(){
+  const body=document.getElementById('photosBody');
+  PhotosView.urls.forEach(u=>URL.revokeObjectURL(u)); PhotosView.urls=[]; PhotosView.sel.clear();
+  const proj=currentProj();
+  if(!proj){ body.innerHTML=`<div class="empty">工事を選択してください。</div>`; return; }
+  const all=(await DB.byIndex('photos','constructionId',proj.id)).filter(p=>p.kind==='composite');
+  all.sort((a,b)=>b.takenAt-a.takenAt);
+  if(!all.length){ body.innerHTML=`<div class="empty">まだ写真がありません。</div>`; return; }
+  // 日付グループ
+  const groups={};
+  all.forEach(p=>{ (groups[p.dateKey]=groups[p.dateKey]||[]).push(p); });
+  let html=`<div class="selbar"><span id="selCount">0枚選択</span><span style="flex:1"></span>
+    <button class="btn" id="btnDownload" disabled>ダウンロード</button>
+    <button class="btn danger" id="btnDelSel" disabled>削除</button></div>`;
+  Object.keys(groups).sort().reverse().forEach(dk=>{
+    const d=`${dk.slice(0,4)}/${dk.slice(4,6)}/${dk.slice(6,8)}`;
+    html+=`<div class="day-group"><div class="day-head">${d}（${groups[dk].length}枚）</div><div class="grid">`;
+    groups[dk].forEach(p=>{
+      const url=URL.createObjectURL(p.thumb||p.blob); PhotosView.urls.push(url);
+      html+=`<div class="pcell" data-id="${p.id}"><img src="${url}"><div class="sel"></div></div>`;
+    });
+    html+=`</div></div>`;
+  });
+  body.innerHTML=html;
+  body.querySelectorAll('.pcell').forEach(c=>{
+    c.addEventListener('click',()=>{
+      const id=c.getAttribute('data-id');
+      if(PhotosView.sel.has(id)){ PhotosView.sel.delete(id); c.classList.remove('on'); }
+      else { PhotosView.sel.add(id); c.classList.add('on'); }
+      updateSelBar();
+    });
+  });
+  document.getElementById('btnDownload').addEventListener('click',downloadSelected);
+  document.getElementById('btnDelSel').addEventListener('click',deleteSelected);
+  updateSelBar();
+}
+function updateSelBar(){
+  const n=PhotosView.sel.size;
+  document.getElementById('selCount').textContent=n+'枚選択';
+  document.getElementById('btnDownload').disabled=!n;
+  document.getElementById('btnDelSel').disabled=!n;
+}
+async function downloadSelected(){
+  const ids=[...PhotosView.sel];
+  const withOrg=await confirmDlg(`選択した ${ids.length}枚 をダウンロードします。元写真（_org）も一緒に保存しますか？`,'合成版＋元写真');
+  const dl=(blob,name)=>{ const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); };
+  for(const id of ids){
+    const rec=await DB.get('photos',id);
+    dl(rec.blob, rec.filename);
+    if(withOrg==='ok'){
+      const org=(await DB.byIndex('photos','constructionId',rec.constructionId)).find(x=>x.pairId===rec.pairId && x.kind==='org');
+      if(org) await new Promise(r=>setTimeout(r,300)), dl(org.blob, org.filename);
+    }
+    await new Promise(r=>setTimeout(r,400)); // モバイルの連続DL対策
+  }
+  toast('ダウンロードしました');
+}
+async function deleteSelected(){
+  const ids=[...PhotosView.sel];
+  const go=await confirmDlg(`選択した ${ids.length}枚 を削除しますか？（元写真も削除されます）`,'削除する',true);
+  if(go!=='ok') return;
+  for(const id of ids){
+    const rec=await DB.get('photos',id);
+    const pair=(await DB.byIndex('photos','constructionId',rec.constructionId)).filter(x=>x.pairId===rec.pairId);
+    for(const x of pair) await DB.del('photos',x.id);
+  }
+  renderPhotos(); toast('削除しました');
+}
+
+/* =========================================================================
+   設定
+   ========================================================================= */
+function renderSettings(){
+  const s=State.settings, L=labels();
+  const body=document.getElementById('settingsBody');
+  const q=Math.round((s.quality||0.92)*100);
+  const labelRow=(k,name)=>`<div class="field"><label>${esc(name)} のラベル</label>
+    <input type="text" id="lbl_${k}" value="${esc(L[k])}"></div>`;
+  body.innerHTML=`
+    <div class="card">
+      <div class="sec-title">受注者 既定値</div>
+      <div class="field"><input type="text" id="set_jyuchusha" value="${esc(s.defaultJyuchusha||'さかえ電気')}"></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">画質（JPEG）</div>
+      <div class="field"><input type="range" id="set_quality" min="60" max="100" value="${q}" style="width:100%">
+      <div class="hint">現在: <span id="qval">${q}</span>%（高いほど高画質・大容量）</div></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">黒板の項目名（ラベル変更）</div>
+      ${labelRow('constructionName','工事名')}${labelRow('koushu','工種')}${labelRow('spot','撮影箇所')}
+      ${labelRow('caption','内容')}${labelRow('date','撮影日')}${labelRow('jyuchusha','受注者')}
+    </div>
+    <button class="btn primary block" id="btnSaveSettings">設定を保存</button>
+    <div style="height:14px"></div>
+    <div class="hint">写真とデータはこの端末内（IndexedDB）にのみ保存されます。Google Drive連携は Phase 3 で追加予定。</div>`;
+  body.querySelector('#set_quality').addEventListener('input',e=>{ body.querySelector('#qval').textContent=e.target.value; });
+  body.querySelector('#btnSaveSettings').addEventListener('click',async ()=>{
+    s.defaultJyuchusha=body.querySelector('#set_jyuchusha').value.trim()||'さかえ電気';
+    s.quality=Math.min(1,Math.max(0.6, (+body.querySelector('#set_quality').value||92)/100));
+    s.labels=s.labels||{};
+    ['constructionName','koushu','spot','caption','date','jyuchusha'].forEach(k=>{
+      s.labels[k]=body.querySelector('#lbl_'+k).value.trim()||DEFAULT_LABELS[k];
+    });
+    await saveSettings(); toast('保存しました');
+  });
+}
+
+/* =========================================================================
+   イベント配線 / 起動
+   ========================================================================= */
+document.getElementById('btnBack').addEventListener('click',()=>go('home'));
+document.getElementById('mStart').addEventListener('click',()=>go('capture'));
+document.getElementById('mProjects').addEventListener('click',()=>go('projects'));
+document.getElementById('mPhotos').addEventListener('click',()=>go('photos'));
+document.getElementById('mSettings').addEventListener('click',()=>go('settings'));
+document.getElementById('btnAddProj').addEventListener('click',()=>editProj(null));
+document.getElementById('btnShutter').addEventListener('click',shutter);
+document.getElementById('btnEditBoard').addEventListener('click',openBoardEditor);
+document.getElementById('lastThumb').addEventListener('click',()=>go('photos'));
+document.getElementById('btnCorner').addEventListener('click',()=>{
+  const i=CORNER_ORDER.indexOf(State.corner); State.corner=CORNER_ORDER[(i+1)%CORNER_ORDER.length];
+  const p=currentProj(); if(p){ p.corner=State.corner; saveProj(p); }
+  updateBoardOverlay();
+});
+document.getElementById('btnSize').addEventListener('click',()=>{
+  const order=['S','M','L']; const i=order.indexOf(State.size); State.size=order[(i+1)%order.length];
+  const p=currentProj(); if(p){ p.size=State.size; saveProj(p); }
+  updateBoardOverlay();
+});
+window.addEventListener('resize',()=>{ if(_screen==='capture') updateBoardOverlay(); });
+window.addEventListener('orientationchange',()=>{ if(_screen==='capture') setTimeout(updateBoardOverlay,300); });
+
+(async function init(){
+  try{ await loadState(); }catch(e){ console.error(e); await alertDlg('データの読み込みに失敗しました。'+(e&&e.message||''),'エラー'); }
+  renderHome();
+  if('serviceWorker' in navigator){
+    navigator.serviceWorker.register('sw.js').catch(()=>{});
+  }
+})();
+
+// デバッグ/検証用に一部を公開
+window.__cam={ State, DB, renderBoardCanvas, embedMeta, buildXmp, boardData, shutter, Cam };
+})();
+</script>
+</body>
+</html>
