@@ -105,6 +105,12 @@
   .pcell img{width:100%; height:100%; object-fit:cover; display:block;}
   .pcell .sel{position:absolute; top:4px; left:4px; width:24px; height:24px; border-radius:50%; background:rgba(0,0,0,.4); border:2px solid #fff;}
   .pcell.on .sel{background:var(--green);}
+  .pcell .dlbadge{position:absolute; top:4px; right:4px; min-width:22px; height:22px; padding:0 5px; border-radius:11px; background:var(--ok); color:#fff; font-size:13px; font-weight:700; display:flex; align-items:center; justify-content:center; box-shadow:0 1px 3px rgba(0,0,0,.4);}
+  .prev-item{margin-bottom:14px;}
+  .prev-item img{width:100%; max-height:44vh; object-fit:contain; background:#111; border-radius:10px; display:block;}
+  .prev-item .fn{font-size:13px; color:var(--muted); margin-top:5px; word-break:break-all;}
+  .prev-opt{display:flex; align-items:center; gap:10px; margin:6px 0 2px; font-size:15px;}
+  .prev-opt input{width:22px; height:22px;}
   .selbar{position:sticky; top:0; z-index:3; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:10px; display:flex; gap:8px; align-items:center; margin-bottom:10px;}
 
   /* ---- Dialog / toast ---- */
@@ -597,8 +603,9 @@ async function shutter(){
     // 合成版
     const comp=document.createElement('canvas'); comp.width=w; comp.height=h;
     const cctx=comp.getContext('2d'); cctx.drawImage(full,0,0);
-    const board=renderBoardCanvas(data, proj.preset||'standard', Math.round(w*(SIZE_RATIO[State.size]||0.30)));
-    const margin=Math.round(w*0.03);
+    const baseEdge=Math.min(w,h); // 短辺基準：縦横どちらでも黒板の物理サイズを一定に
+    const board=renderBoardCanvas(data, proj.preset||'standard', Math.round(baseEdge*(SIZE_RATIO[State.size]||0.30)));
+    const margin=Math.round(baseEdge*0.03);
     const pos=cornerPos(State.corner, w, h, board.width, board.height, margin);
     cctx.drawImage(board, pos.x, pos.y);
     const compBlob=await new Promise(r=>comp.toBlob(r,'image/jpeg',quality));
@@ -643,15 +650,16 @@ function updateBoardOverlay(){
   const wrap=document.getElementById('camWrap'), ov=document.getElementById('boardOverlay');
   const cw=wrap.clientWidth, ch=wrap.clientHeight; if(!cw) return;
   const ratio=SIZE_RATIO[State.size]||0.30;
-  const W=Math.round(cw*ratio);
+  const baseEdge=Math.min(cw,ch); // 短辺基準（保存側の Math.min(w,h) と一致）
+  const W=Math.round(baseEdge*ratio);
   const data=boardData();
   const cv=renderBoardCanvas(data, proj.preset||'standard', W);
   ov.innerHTML=''; ov.appendChild(cv);
   ov.style.width=W+'px';
-  const margin=Math.round(cw*0.03);
-  const bh=cv.height*(W/cv.width); // = cv.height (W===cv.width)
+  const margin=Math.round(baseEdge*0.03);
+  const bh=cv.height*(W/cv.width); // 表示上の高さ（内部canvasは最小180pxにクランプされ得るため実表示比で算出）
   ov.style.left = State.corner[1]==='l' ? margin+'px' : (cw-W-margin)+'px';
-  ov.style.top  = State.corner[0]==='t' ? margin+'px' : (ch-cv.height-margin)+'px';
+  ov.style.top  = State.corner[0]==='t' ? margin+'px' : Math.round(ch-bh-margin)+'px';
   // ラベル更新
   document.getElementById('cornerLbl').textContent=CORNER_LABEL[State.corner];
   document.getElementById('sizeLbl').textContent=SIZE_LABEL[State.size];
@@ -856,7 +864,8 @@ async function renderPhotos(){
     html+=`<div class="day-group"><div class="day-head">${d}（${groups[dk].length}枚）</div><div class="grid">`;
     groups[dk].forEach(p=>{
       const url=URL.createObjectURL(p.thumb||p.blob); PhotosView.urls.push(url);
-      html+=`<div class="pcell" data-id="${p.id}"><img src="${url}"><div class="sel"></div></div>`;
+      const dl = p.downloadedAt ? `<div class="dlbadge" title="ダウンロード済 ${new Date(p.downloadedAt).toLocaleDateString('ja-JP')}">✓</div>` : '';
+      html+=`<div class="pcell" data-id="${p.id}"><img src="${url}"><div class="sel"></div>${dl}</div>`;
     });
     html+=`</div></div>`;
   });
@@ -869,7 +878,7 @@ async function renderPhotos(){
       updateSelBar();
     });
   });
-  document.getElementById('btnDownload').addEventListener('click',downloadSelected);
+  document.getElementById('btnDownload').addEventListener('click',previewAndDownload);
   document.getElementById('btnDelSel').addEventListener('click',deleteSelected);
   updateSelBar();
 }
@@ -879,20 +888,46 @@ function updateSelBar(){
   document.getElementById('btnDownload').disabled=!n;
   document.getElementById('btnDelSel').disabled=!n;
 }
-async function downloadSelected(){
+// ダウンロード前プレビュー → 確認して一括DL → downloadedAt を永続化
+async function previewAndDownload(){
   const ids=[...PhotosView.sel];
-  const withOrg=await confirmDlg(`選択した ${ids.length}枚 をダウンロードします。元写真（_org）も一緒に保存しますか？`,'合成版＋元写真');
+  if(!ids.length) return;
+  // 選択レコード（合成版）を取得
+  const recs=[];
+  for(const id of ids){ const r=await DB.get('photos',id); if(r) recs.push(r); }
+  recs.sort((a,b)=>b.takenAt-a.takenAt);
+  const urls=[];
+  const items=recs.map(r=>{ const u=URL.createObjectURL(r.blob); urls.push(u);
+    return `<div class="prev-item"><img src="${u}"><div class="fn">${esc(r.filename)}${r.downloadedAt?' <span class="badge">DL済</span>':''}</div></div>`; }).join('');
+  const html=`<h2>ダウンロードのプレビュー（${recs.length}枚）</h2>
+    ${items}
+    <label class="prev-opt"><input type="checkbox" id="pv_org">元写真（_org）も一緒にダウンロード</label>
+    <div class="hint">確認後、下のボタンで端末に保存します。</div>
+    <div class="dlg-actions"><button class="btn" data-close="cancel">キャンセル</button>
+    <button class="btn primary" data-x="dl">この${recs.length}枚をDL</button></div>`;
+  await dialog(html,{onMount:(m,done)=>{
+    m.querySelector('[data-x=dl]').addEventListener('click', async ()=>{
+      const withOrg=m.querySelector('#pv_org').checked;
+      done('dl'); // モーダルを閉じてからDL
+      await doDownload(recs, withOrg);
+    });
+  }});
+  urls.forEach(u=>URL.revokeObjectURL(u));
+}
+async function doDownload(recs, withOrg){
   const dl=(blob,name)=>{ const u=URL.createObjectURL(blob); const a=document.createElement('a'); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(u),4000); };
-  for(const id of ids){
-    const rec=await DB.get('photos',id);
+  const now=Date.now();
+  for(const rec of recs){
     dl(rec.blob, rec.filename);
-    if(withOrg==='ok'){
+    rec.downloadedAt=now; await DB.put('photos', rec); // 履歴を永続
+    if(withOrg){
       const org=(await DB.byIndex('photos','constructionId',rec.constructionId)).find(x=>x.pairId===rec.pairId && x.kind==='org');
-      if(org) await new Promise(r=>setTimeout(r,300)), dl(org.blob, org.filename);
+      if(org){ await new Promise(r=>setTimeout(r,300)); dl(org.blob, org.filename); org.downloadedAt=now; await DB.put('photos', org); }
     }
     await new Promise(r=>setTimeout(r,400)); // モバイルの連続DL対策
   }
   toast('ダウンロードしました');
+  renderPhotos(); // ☑バッジを反映（選択もクリア）
 }
 async function deleteSelected(){
   const ids=[...PhotosView.sel];
@@ -968,7 +1003,11 @@ document.getElementById('btnSize').addEventListener('click',()=>{
   updateBoardOverlay();
 });
 window.addEventListener('resize',()=>{ if(_screen==='capture') updateBoardOverlay(); });
-window.addEventListener('orientationchange',()=>{ if(_screen==='capture') setTimeout(updateBoardOverlay,300); });
+window.addEventListener('orientationchange',()=>{
+  if(_screen!=='capture') return;
+  // 回転直後は寸法確定が遅れる端末があるため複数回リトライ
+  [120,350,700].forEach(ms=>setTimeout(()=>{ if(_screen==='capture') updateBoardOverlay(); }, ms));
+});
 
 (async function init(){
   try{ await loadState(); }catch(e){ console.error(e); await alertDlg('データの読み込みに失敗しました。'+(e&&e.message||''),'エラー'); }
@@ -979,7 +1018,9 @@ window.addEventListener('orientationchange',()=>{ if(_screen==='capture') setTim
 })();
 
 // デバッグ/検証用に一部を公開
-window.__cam={ State, DB, renderBoardCanvas, embedMeta, buildXmp, boardData, shutter, Cam };
+window.__cam={ State, DB, renderBoardCanvas, embedMeta, buildXmp, boardData, shutter, Cam,
+  updateBoardOverlay, renderPhotos, previewAndDownload, loadState, go, PhotosView,
+  SIZE_RATIO, get corner(){return State.corner;}, set corner(v){State.corner=v;}, get size(){return State.size;}, set size(v){State.size=v;} };
 })();
 </script>
 </body>
